@@ -70,7 +70,7 @@ public:
 #if MODE_AUTOLAND_ENABLED
         AUTOLAND      = 26,
 #endif
-
+        STT           = 27,
     // Mode number 30 reserved for "offboard" for external/lua control.
     };
 
@@ -1073,3 +1073,17 @@ protected:
 };
 
 #endif
+
+class ModeSTT : public Mode {
+public:
+    Number mode_number() const override { return Number::STT; }
+    const char *name() const override { return "STT"; }
+    const char *name4() const override { return "STT "; }
+
+    void update() override;
+    void run() override;
+    
+protected:
+    bool _enter() override;
+};
+

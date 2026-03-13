@@ -195,6 +195,91 @@ void Plane::channel_function_mixer(SRV_Channel::Function func1_in, SRV_Channel::
     SRV_Channels::set_output_scaled(func2_out, out2);
 }
 
+void Plane::xtail_mixer() const
+{
+    const float pitch = SRV_Channels::get_output_scaled(SRV_Channel::k_elevator);
+    const float yaw   = SRV_Channels::get_output_scaled(SRV_Channel::k_rudder);
+    const float roll  = SRV_Channels::get_output_scaled(SRV_Channel::k_aileron);
+
+    // 可调增益（参数或硬编码）
+    const float gain_pitch = g.mixing_gain;   // 俯仰混控系数
+    const float gain_yaw   = g.mixing_gain;   // 偏航混控系数
+    const float gain_roll  = g.mixing_gain;            // 滚转参与比例，可微调
+
+    // 标准化输入
+    const float p = pitch * gain_pitch;
+    const float y = yaw   * gain_yaw;
+    const float r = roll  * gain_roll;
+
+    // ========================
+    // X尾混控矩阵（可单独调整每个系数）
+    // ========================
+    const float a1=1, b1=1, c1=1;
+    const float a2=1, b2=1, c2=1;
+    const float a3=1, b3=1, c3=1;
+    const float a4=1, b4=1, c4=1;
+
+    // 上左 (UL)
+    float upper_left  =  -a1*p - b1*y + c1*r;
+    // 上右 (UR)
+    float upper_right =  -a2*p + b2*y - c2*r;
+    // 下左 (LL)
+    float lower_left  =  -a3*p + b3*y + c3*r;
+    // 下右 (LR)
+    float lower_right =  -a4*p - b4*y - c4*r;
+
+    // 限幅防止溢出
+    upper_left  = constrain_float(upper_left,  -4500.f, 4500.f);
+    upper_right = constrain_float(upper_right, -4500.f, 4500.f);
+    lower_left  = constrain_float(lower_left,  -4500.f, 4500.f);
+    lower_right = constrain_float(lower_right, -4500.f, 4500.f);
+
+    // 输出
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_upper_left,  upper_left);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_upper_right, upper_right);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_lower_left,  lower_left);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_lower_right, lower_right);
+}
+
+/*
+  stt_mixer — cruciform 4-fin mixer with inertial→body frame rotation
+
+  Reads Lua guidance outputs (pitch/yaw/roll in inertial frame) from
+  Script Motor functions (95/96/97), rotates pitch/yaw into body frame
+  using current roll angle, then mixes to 4 independent fin surfaces.
+
+  Fin layout at roll=0:
+    Left/Right (horizontal pair) → pitch control
+    Upper/Lower (vertical pair)  → yaw control
+    Differential on all 4        → roll correction
+*/
+void Plane::stt_mixer()
+{
+    // read Lua guidance outputs (Script Motor functions, normalized -1..+1)
+    const float pitch_in = SRV_Channels::get_output_norm(SRV_Channel::k_scripting2);  // pitch
+    const float yaw_in   = SRV_Channels::get_output_norm(SRV_Channel::k_scripting4);  // yaw
+    const float roll_cmd = SRV_Channels::get_output_norm(SRV_Channel::k_scripting3);  // roll
+
+    // inertial → body frame rotation (rotate by current roll angle)
+    const float phi = ahrs.get_roll();  // current roll angle (rad)
+    const float cp = cosf(phi);
+    const float sp = sinf(phi);
+    const float pitch_body =  pitch_in * cp + yaw_in * sp;
+    const float yaw_body   = -pitch_in * sp + yaw_in * cp;
+
+    // 4-fin cruciform mixing
+    const float left  = constrain_float( pitch_body - roll_cmd, -1.0f, 1.0f);
+    const float right = constrain_float( pitch_body + roll_cmd, -1.0f, 1.0f);
+    const float upper = constrain_float( yaw_body   - roll_cmd, -1.0f, 1.0f);
+    const float lower = constrain_float( yaw_body   + roll_cmd, -1.0f, 1.0f);
+
+    // output to ctail servo channels (SERVO5-8)
+    SRV_Channels::set_output_norm(SRV_Channel::k_ctail_left,  left);
+    SRV_Channels::set_output_norm(SRV_Channel::k_ctail_right, right);
+    SRV_Channels::set_output_norm(SRV_Channel::k_ctail_upper, upper);
+    SRV_Channels::set_output_norm(SRV_Channel::k_ctail_lower, lower);
+}
+
 
 /*
   setup flaperon output channels
@@ -400,7 +485,6 @@ void ModeAuto::wiggle_servos()
     SRV_Channels::set_output_scaled(SRV_Channel::k_rudder, servo_valueAileronRudder);
 
 }
-
 
 /*
   Calculate the throttle scale to compensate for battery voltage drop
@@ -1027,6 +1111,13 @@ void Plane::servos_output(void)
     channel_function_mixer(SRV_Channel::k_aileron, SRV_Channel::k_elevator, SRV_Channel::k_elevon_left, SRV_Channel::k_elevon_right);
     channel_function_mixer(SRV_Channel::k_rudder,  SRV_Channel::k_elevator, SRV_Channel::k_vtail_right, SRV_Channel::k_vtail_left);
 
+    xtail_mixer();
+
+    // if (control_mode->mode_number() == Mode::Number::STT) {
+    //     stt_mixer();  // STT 模式才混控
+    // }
+    stt_mixer();  // STT 模式才混控
+
 #if HAL_QUADPLANE_ENABLED
     // cope with tailsitters and bicopters
     quadplane.tailsitter.output();
@@ -1119,6 +1210,11 @@ void Plane::servos_auto_trim(void)
 
     g2.servo_channels.adjust_trim(SRV_Channel::k_vtail_left,  pitch_I);
     g2.servo_channels.adjust_trim(SRV_Channel::k_vtail_right, pitch_I);
+
+    g2.servo_channels.adjust_trim(SRV_Channel::k_xtail_upper_left,  pitch_I);
+    g2.servo_channels.adjust_trim(SRV_Channel::k_xtail_upper_right, pitch_I);
+    g2.servo_channels.adjust_trim(SRV_Channel::k_xtail_lower_left,  pitch_I);
+    g2.servo_channels.adjust_trim(SRV_Channel::k_xtail_lower_right, pitch_I);
 
     g2.servo_channels.adjust_trim(SRV_Channel::k_flaperon_left,  roll_I);
     g2.servo_channels.adjust_trim(SRV_Channel::k_flaperon_right, roll_I);

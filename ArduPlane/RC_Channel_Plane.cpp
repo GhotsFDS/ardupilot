@@ -495,6 +495,9 @@ bool RC_Channel_Plane::do_aux_function(const AuxFuncTrigger &trigger)
         break;
 
 #endif
+    case AUX_FUNC::STT:
+        do_aux_function_change_mode(Mode::Number::STT, ch_flag);
+        break;
 
     default:
         return RC_Channel::do_aux_function(trigger);

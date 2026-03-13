@@ -89,16 +89,26 @@ protected:
         // the X CoG offset should be -0.02, but that makes the plane too tail heavy
         // in manual flight. Adjusted to -0.15 gives reasonable flight
         Vector3f CGOffset{-0.15, 0, -0.05};
+        // optional mass/inertia/thrust override from JSON model
+        float mass_override = 0;                    // 0 = use default (2kg)
+        Vector3f moment_of_inertia{0, 0, 0};        // 0,0,0 = use implicit I=1
+        float max_thrust = 0;                        // 0 = auto (mass*g/hover_throttle)
+        // air-start: launch from altitude with initial velocity (for missiles)
+        float initial_alt_offset = 0;               // 0 = ground start; >0 = start at this AGL (m)
+        Vector3f initial_velocity{0, 0, 0};          // NED initial velocity (m/s)
     } default_coefficients;
 
     struct Coefficients coefficient;
 
     float thrust_scale;
+    bool air_start_done;
+    bool carrier_released;
     bool reverse_thrust;
     bool elevons;
     bool vtail;
     bool dspoilers;
     bool redundant;
+    bool cruciform;        // cruciform fin missile mode: symmetric pitch/yaw aero
     bool reverse_elevator_rudder;
     bool ice_engine;
     bool tailsitter;

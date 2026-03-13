@@ -371,6 +371,8 @@ public:
         k_param_mode_autoland,
         k_param__gcs,
 
+        k_param_stt_controller = 274,
+
     };
 
     AP_Int16 format_version;

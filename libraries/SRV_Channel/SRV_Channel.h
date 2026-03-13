@@ -219,6 +219,14 @@ public:
         k_actuator4             = 187,
         k_actuator5             = 188,
         k_actuator6             = 189,
+        k_xtail_upper_left      = 190,
+        k_xtail_upper_right     = 191,
+        k_xtail_lower_left      = 192,
+        k_xtail_lower_right     = 193,
+        k_ctail_upper           = 194,
+        k_ctail_lower           = 195,
+        k_ctail_left            = 196,
+        k_ctail_right           = 197,
         k_nr_aux_servo_functions         ///< This must be the last enum value (only add new values _before_ this one)
     } Function;
 

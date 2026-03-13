@@ -987,6 +987,8 @@ const AP_Param::Info Plane::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
+    GOBJECT(stt_controller, "STT_",  AP_STTController),
+
     AP_VAREND
 };
 
@@ -1074,6 +1076,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Bitmask: 14: In AUTO - climb to next waypoint altitude immediately instead of linear climb
     // @Bitmask: 15: Enable autoflap in manual modes and use minimum of target and actual speed for flap setting
     // @Bitmask: 16: Enable full aerodynamic load factor-based roll limits when an airspeed sensor is enabled and AIRSPEED_STALL is set
+    // @Bitmask: 17: Disable speed scaling for control surfaces (missile/munition mode, Lua script handles scaling)
     // @User: Advanced
     AP_GROUPINFO("FLIGHT_OPTIONS", 13, ParametersG2, flight_options, 0),
 
@@ -1344,10 +1347,10 @@ void Plane::load_parameters(void)
     AP_Param::convert_old_parameters(&conversion_table[0], ARRAY_SIZE(conversion_table));
 
     // setup defaults in SRV_Channels
-    g2.servo_channels.set_default_function(CH_1, SRV_Channel::k_aileron);
-    g2.servo_channels.set_default_function(CH_2, SRV_Channel::k_elevator);
-    g2.servo_channels.set_default_function(CH_3, SRV_Channel::k_throttle);
-    g2.servo_channels.set_default_function(CH_4, SRV_Channel::k_rudder);
+    g2.servo_channels.set_default_function(CH_1, SRV_Channel::k_ctail_upper);
+    g2.servo_channels.set_default_function(CH_2, SRV_Channel::k_ctail_lower);
+    g2.servo_channels.set_default_function(CH_3, SRV_Channel::k_ctail_left);
+    g2.servo_channels.set_default_function(CH_4, SRV_Channel::k_ctail_right);
         
     SRV_Channels::upgrade_parameters();
 

@@ -213,6 +213,7 @@ bool Plane::gcs_mode_enabled(const Mode::Number mode_num) const
         (uint8_t)Mode::Number::AVOID_ADSB,
         (uint8_t)Mode::Number::GUIDED,
         (uint8_t)Mode::Number::THERMAL,
+        (uint8_t)Mode::Number::STT,
 #if HAL_QUADPLANE_ENABLED
         (uint8_t)Mode::Number::QSTABILIZE,
         (uint8_t)Mode::Number::QHOVER,

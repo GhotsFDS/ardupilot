@@ -7,6 +7,12 @@
  */
 float Plane::calc_speed_scaler(void)
 {
+    // Missile/munition mode: disable speed scaling entirely.
+    // Lua scripts handle their own gain scheduling via set_output_norm().
+    if (flight_option_enabled(FlightOptions::DISABLE_SPEED_SCALING)) {
+        return 1.0f;
+    }
+
     float aspeed, speed_scaler;
     if (ahrs.airspeed_EAS(aspeed)) {
         if (aspeed > auto_state.highest_airspeed && arming.is_armed_and_safety_off()) {

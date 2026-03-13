@@ -508,6 +508,14 @@ void Tailsitter::output(void)
     SRV_Channels::set_output_scaled(SRV_Channel::k_vtail_right, elevator_mix - rudder_mix);
     SRV_Channels::set_output_scaled(SRV_Channel::k_vtail_left, elevator_mix + rudder_mix);
 
+    float xtail_ratio_upper = 1.0f;
+    float xtail_ratio_lower = 0.8f;
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_upper_left,  (elevator_mix + rudder_mix) * xtail_ratio_upper);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_upper_right, (elevator_mix - rudder_mix) * xtail_ratio_upper);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_lower_left,  (elevator_mix + rudder_mix) * xtail_ratio_lower);
+    SRV_Channels::set_output_scaled(SRV_Channel::k_xtail_lower_right, (elevator_mix - rudder_mix) * xtail_ratio_lower);
+
+
     if (roll_lim) {
         motors->limit.roll = true;
     }

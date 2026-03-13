@@ -368,6 +368,7 @@ public:
         AHRS_AUTO_TRIM =     182,  // in-flight AHRS autotrim
         AUTOLAND =           183,  //Fixed Wing AUTOLAND Mode
         SYSTEMID =           184,  // system ID as an aux switch
+        STT = 185,  // 自定义 STT 模式
 
         // inputs from 200 will eventually used to replace RCMAP
         ROLL =               201, // roll input

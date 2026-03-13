@@ -83,6 +83,10 @@ void GCS_Plane::update_vehicle_sensor_status_flags(void)
         control_sensors_health |= MAV_SYS_STATUS_SENSOR_XY_POSITION_CONTROL;
         break;
 
+    case Mode::Number::STT:
+        rate_controlled = true;
+        attitude_stabilized = true;
+        break;
     case Mode::Number::INITIALISING:
         break;
     }

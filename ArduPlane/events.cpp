@@ -25,6 +25,19 @@ void Plane::rc_failsafe_short_on_event()
     failsafe.saved_mode_number = control_mode->mode_number();
     switch (control_mode->mode_number())
     {
+    case Mode::Number::STT:
+        if(plane.emergency_landing) {
+            set_mode(mode_fbwa, ModeReason::RADIO_FAILSAFE); // 可自定义失败后切回 FBWA
+            break;
+        }
+        if(g.fs_action_short == FS_ACTION_SHORT_FBWA) {
+            set_mode(mode_fbwa, ModeReason::RADIO_FAILSAFE);
+        } else if (g.fs_action_short == FS_ACTION_SHORT_FBWB) {
+            set_mode(mode_fbwb, ModeReason::RADIO_FAILSAFE);
+        } else {
+            set_mode(mode_circle, ModeReason::RADIO_FAILSAFE); // 默认保底行为
+        }
+        break;
     case Mode::Number::MANUAL:
     case Mode::Number::STABILIZE:
     case Mode::Number::ACRO:
@@ -133,6 +146,7 @@ void Plane::failsafe_long_on_event(enum failsafe_state fstype, ModeReason reason
     case Mode::Number::LOITER:
     case Mode::Number::THERMAL:
     case Mode::Number::TAKEOFF:
+    case Mode::Number::STT:
         if (plane.flight_stage == AP_FixedWing::FlightStage::TAKEOFF && !(g.fs_action_long == FS_ACTION_LONG_GLIDE || g.fs_action_long == FS_ACTION_LONG_PARACHUTE)) {
             // don't failsafe if in initial climb of TAKEOFF mode and FS action is not parachute or glide
             // long failsafe will be re-called if still in fs after initial climb

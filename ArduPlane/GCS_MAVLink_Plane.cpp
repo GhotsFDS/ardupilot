@@ -27,6 +27,9 @@ uint8_t GCS_MAVLINK_Plane::base_mode() const
     // the APM flight mode and has a well defined meaning in the
     // ArduPlane documentation
     switch (plane.control_mode->mode_number()) {
+    case Mode::Number::STT:
+        _base_mode = MAV_MODE_FLAG_STABILIZE_ENABLED | MAV_MODE_FLAG_GUIDED_ENABLED;
+        break;
     case Mode::Number::MANUAL:
     case Mode::Number::TRAINING:
     case Mode::Number::ACRO:
@@ -1340,6 +1343,7 @@ uint8_t GCS_MAVLINK_Plane::send_available_mode(uint8_t index) const
         &plane.mode_auto,
         &plane.mode_rtl,
         &plane.mode_loiter,
+        &plane.mode_stt,
 #if HAL_ADSB_ENABLED
         &plane.mode_avoidADSB,
 #endif

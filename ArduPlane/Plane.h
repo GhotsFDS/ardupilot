@@ -59,6 +59,7 @@
 #include <AP_Navigation/AP_Navigation.h>
 #include <AP_L1_Control/AP_L1_Control.h>
 #include <AP_RCMapper/AP_RCMapper.h>        // RC input mapping library
+#include <AP_STTController/AP_STTController.h>
 
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_TECS/AP_TECS.h>
@@ -174,6 +175,7 @@ public:
     friend class ModeTakeoff;
     friend class ModeThermal;
     friend class ModeLoiterAltQLand;
+    friend class ModeSTT;
 #if MODE_AUTOLAND_ENABLED
     friend class ModeAutoLand;
 #endif
@@ -188,7 +190,7 @@ public:
 #endif
 
     Plane(void);
-
+    
 private:
 
     // key aircraft parameters passed to multiple libraries
@@ -250,6 +252,8 @@ private:
     AP_PitchController pitchController{aparm};
     AP_YawController yawController{aparm};
     AP_SteerController steerController{};
+
+    AP_STTController stt_controller{}; 
 
     // Training mode
     bool training_manual_roll;  // user has manual roll control
@@ -335,6 +339,7 @@ private:
 #if HAL_SOARING_ENABLED
     ModeThermal mode_thermal;
 #endif
+    ModeSTT mode_stt;
 
 #if AP_QUICKTUNE_ENABLED
     AP_Quicktune quicktune;
@@ -1179,6 +1184,11 @@ private:
     void update_throttle_hover();
     void channel_function_mixer(SRV_Channel::Function func1_in, SRV_Channel::Function func2_in,
                                 SRV_Channel::Function func1_out, SRV_Channel::Function func2_out) const;
+    
+    void xtail_mixer() const;
+
+    void stt_mixer();
+    
     void flaperon_update();
     void indicate_waiting_for_rud_neutral_to_takeoff(void);
 
@@ -1332,6 +1342,7 @@ public:
 };
 
 extern Plane plane;
+extern Plane* gplane;
 
 using AP_HAL::millis;
 using AP_HAL::micros;

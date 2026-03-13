@@ -59,6 +59,7 @@ SCHED_TASK_CLASS arguments:
 FAST_TASK entries are run on every loop even if that means the loop
 overruns its allotted time
  */
+
 const AP_Scheduler::Task Plane::scheduler_tasks[] = {
                            // Units:   Hz      us
     FAST_TASK(ahrs_update),
@@ -1081,9 +1082,14 @@ Plane::Plane(void)
 {
     // C++11 doesn't allow in-class initialisation of bitfields
     auto_state.takeoff_complete = true;
+
+    gplane = this;
 }
 
 Plane plane;
 AP_Vehicle& vehicle = plane;
+Plane *gplane = nullptr;
+
+
 
 AP_HAL_MAIN_CALLBACKS(&plane);

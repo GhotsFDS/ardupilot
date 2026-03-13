@@ -40,11 +40,21 @@ Plane::Plane(const char *frame_str) :
 
     mass = 2.0f;
 
+    // apply mass override from JSON model if specified
+    if (coefficient.mass_override > 0) {
+        mass = coefficient.mass_override;
+    }
+
     /*
        scaling from motor power to Newtons. Allows the plane to hold
        vertically against gravity when the motor is at hover_throttle
     */
     thrust_scale = (mass * GRAVITY_MSS) / hover_throttle;
+
+    // apply max_thrust override from JSON (e.g. for rocket motors)
+    if (coefficient.max_thrust > 0) {
+        thrust_scale = coefficient.max_thrust;
+    }
     frame_height = 0.1f;
 
     ground_behavior = GROUND_BEHAVIOR_FWD_ONLY;
@@ -69,6 +79,8 @@ Plane::Plane(const char *frame_str) :
         dspoilers = true;
     } else if (strstr(frame_str, "-redundant")) {
         redundant = true;
+    } else if (strstr(frame_str, "-cruciform")) {
+        cruciform = true;
     }
     if (strstr(frame_str, "-elevrev")) {
         reverse_elevator_rudder = true;
@@ -115,26 +127,79 @@ Plane::Plane(const char *frame_str) :
         mass = 2.0;
         coefficient.c_drag_p = 0.05;
     }
+
+    // cruciform missile mode: enforce pitch/yaw aerodynamic symmetry
+    if (cruciform) {
+        float ratio_cb = coefficient.c / coefficient.b;     // c/b
+        float ratio_cb2 = ratio_cb * ratio_cb;              // (c/b)²
+
+        // control moment symmetry: c_n_deltar = c_m_deltae * c/b
+        coefficient.c_n_deltar = coefficient.c_m_deltae * ratio_cb;
+
+        // rate damping symmetry: c²*c_m_q = b²*c_n_r
+        coefficient.c_n_r = coefficient.c_m_q * ratio_cb2;
+
+        // static stability symmetry: c*c_m_a = b*c_n_b
+        coefficient.c_n_b = fabsf(coefficient.c_m_a) * ratio_cb;
+
+        // sideslip-roll coupling: cruciform symmetric → zero
+        coefficient.c_l_b = 0;
+
+        // cruciform + config: rudder roll coupling near-zero for symmetric body
+        coefficient.c_l_deltar = 0;
+
+        // inertia symmetry: Izz = Iyy
+        if (!is_zero(coefficient.moment_of_inertia.y)) {
+            coefficient.moment_of_inertia.z = coefficient.moment_of_inertia.y;
+        }
+
+        // differential horizontal fins produce no net side force
+        coefficient.c_y_deltaa = 0;
+
+        ::printf("Cruciform mode: c_n_deltar=%.4f c_n_r=%.2f c_n_b=%.3f (c/b=%.3f)\n",
+                 coefficient.c_n_deltar, coefficient.c_n_r, coefficient.c_n_b, ratio_cb);
+    }
+
+    // air-start: disable ground constraints (position/velocity set on first update)
+    air_start_done = false;
+    carrier_released = false;
+    if (coefficient.initial_alt_offset > 0) {
+        ground_behavior = GROUND_BEHAVIOR_NONE;
+        ::printf("Air-start configured: alt_offset=%.0fm vel=(%.1f,%.1f,%.1f)\n",
+                 coefficient.initial_alt_offset,
+                 coefficient.initial_velocity.x,
+                 coefficient.initial_velocity.y,
+                 coefficient.initial_velocity.z);
+    }
 }
 
 void Plane::load_coeffs(const char *model_json)
 {
-    char *fname = nullptr;
+    // Use POSIX file I/O directly since AP::FS() may not be ready
+    // during SITL model construction
     struct stat st;
-    if (AP::FS().stat(model_json, &st) == 0) {
-        fname = strdup(model_json);
-    } else {
-        IGNORE_RETURN(asprintf(&fname, "@ROMFS/models/%s", model_json));
-        if (AP::FS().stat(model_json, &st) != 0) {
-            AP_HAL::panic("%s failed to load", model_json);
-        }
+    if (::stat(model_json, &st) != 0) {
+        AP_HAL::panic("%s: file not found", model_json);
     }
-    if (fname == nullptr) {
-        AP_HAL::panic("%s failed to load", model_json);
+    FILE *f = fopen(model_json, "r");
+    if (f == nullptr) {
+        AP_HAL::panic("%s: cannot open", model_json);
     }
-    AP_JSON::value *obj = AP_JSON::load_json(model_json);
-    if (obj == nullptr) {
-        AP_HAL::panic("%s failed to load", model_json);
+    char *buf = (char *)malloc(st.st_size + 1);
+    if (buf == nullptr) {
+        fclose(f);
+        AP_HAL::panic("%s: out of memory", model_json);
+    }
+    size_t n = fread(buf, 1, st.st_size, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    AP_JSON::value *obj = new AP_JSON::value();
+    std::string err = AP_JSON::parse(*obj, std::string(buf, n));
+    free(buf);
+    if (!err.empty()) {
+        delete obj;
+        AP_HAL::panic("%s: JSON parse error: %s", model_json, err.c_str());
     }
 
     enum class VarType {
@@ -189,6 +254,11 @@ void Plane::load_coeffs(const char *model_json)
         COFF_FLOAT(deltae_max),
         COFF_FLOAT(deltar_max),
         { "CGOffset", &coefficient.CGOffset, VarType::VECTOR3F },
+        { "mass", &coefficient.mass_override, VarType::FLOAT },
+        { "moment_of_inertia", &coefficient.moment_of_inertia, VarType::VECTOR3F },
+        { "max_thrust", &coefficient.max_thrust, VarType::FLOAT },
+        { "initial_alt_offset", &coefficient.initial_alt_offset, VarType::FLOAT },
+        { "initial_velocity", &coefficient.initial_velocity, VarType::VECTOR3F },
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(vars); i++) {
@@ -441,6 +511,17 @@ void Plane::calculate_forces(const struct sitl_input &input, Vector3f &rot_accel
         aileron  = (filtered_servo_angle(input, 0) + filtered_servo_angle(input, 8)) / 2.0;
         elevator = (filtered_servo_angle(input, 1) + filtered_servo_angle(input, 9)) / 2.0;
         rudder   = (filtered_servo_angle(input, 3) + filtered_servo_angle(input, 11)) / 2.0;
+    } else if (cruciform) {
+        // cruciform 4-fin: read SERVO5-8 (channels 4-7)
+        float fin_L = filtered_servo_angle(input, 4);  // left  (horizontal)
+        float fin_R = filtered_servo_angle(input, 5);  // right (horizontal)
+        float fin_U = filtered_servo_angle(input, 6);  // upper (vertical)
+        float fin_D = filtered_servo_angle(input, 7);  // lower (vertical)
+
+        // unmix: 4 fins → 3-axis equivalent
+        elevator = (fin_L + fin_R) / 2.0f;                    // pitch = horizontal common mode
+        rudder   = (fin_U + fin_D) / 2.0f;                    // yaw   = vertical common mode
+        aileron  = (fin_R - fin_L + fin_D - fin_U) / 4.0f;    // roll  = differential
     }
     //printf("Aileron: %.1f elevator: %.1f rudder: %.1f\n", aileron, elevator, rudder);
 
@@ -474,6 +555,28 @@ void Plane::calculate_forces(const struct sitl_input &input, Vector3f &rot_accel
     
     Vector3f force = getForce(aileron, elevator, rudder);
     rot_accel = getTorque(aileron, elevator, rudder, thrust, force);
+
+    // convert torque (N·m) to angular acceleration (rad/s²) using moment of inertia
+    const auto &I = coefficient.moment_of_inertia;
+    if (!is_zero(I.x) && !is_zero(I.y) && !is_zero(I.z)) {
+        rot_accel.x /= I.x;
+        rot_accel.y /= I.y;
+        rot_accel.z /= I.z;
+    }
+
+    // safety: clamp angular acceleration to prevent numerical divergence
+    const float max_rot_accel = 50.0f; // rad/s²
+    rot_accel.x = constrain_float(rot_accel.x, -max_rot_accel, max_rot_accel);
+    rot_accel.y = constrain_float(rot_accel.y, -max_rot_accel, max_rot_accel);
+    rot_accel.z = constrain_float(rot_accel.z, -max_rot_accel, max_rot_accel);
+
+    // safety: check for NaN/Inf in forces and accelerations
+    if (!isfinite(force.x) || !isfinite(force.y) || !isfinite(force.z)) {
+        force.zero();
+    }
+    if (!isfinite(rot_accel.x) || !isfinite(rot_accel.y) || !isfinite(rot_accel.z)) {
+        rot_accel.zero();
+    }
 
     if (have_launcher) {
         /*
@@ -521,13 +624,48 @@ void Plane::calculate_forces(const struct sitl_input &input, Vector3f &rot_accel
  */
 void Plane::update(const struct sitl_input &input)
 {
+    // air-start: initialize state on first frame (before physics)
+    if (coefficient.initial_alt_offset > 0 && !air_start_done) {
+        position.zero();
+        position.z = -coefficient.initial_alt_offset;
+        velocity_ef = coefficient.initial_velocity;
+        dcm.from_euler(0, 0, radians(home_yaw));
+        gyro.zero();
+        accel_body = Vector3f(0, 0, -GRAVITY_MSS);
+        air_start_done = true;
+        carrier_released = false;
+        ::printf("Air-start: carrier hold at %.0fm AGL, V=(%.1f,%.1f,%.1f)\n",
+                 coefficient.initial_alt_offset,
+                 velocity_ef.x, velocity_ef.y, velocity_ef.z);
+    }
+
     Vector3f rot_accel;
 
     update_wind(input);
-    
+
     calculate_forces(input, rot_accel);
-    
+
     update_dynamics(rot_accel);
+
+    // air-start: carrier hold — override state AFTER physics to prevent drift
+    if (coefficient.initial_alt_offset > 0 && air_start_done && !carrier_released) {
+        float throttle = filtered_servo_range(input, 2);
+        if (throttle >= 0.5f) {
+            carrier_released = true;
+            ::printf("Air-start: RELEASED at %.0fm AGL, throttle=%.0f%%\n",
+                     -position.z, throttle * 100);
+        } else {
+            // freeze all state: position, velocity, attitude, angular rate, accel
+            position.zero();
+            position.z = -coefficient.initial_alt_offset;
+            velocity_ef = coefficient.initial_velocity;
+            dcm.from_euler(0, 0, radians(home_yaw));
+            gyro.zero();
+            // reset accelerometer to level flight (gravity only, no aero forces)
+            // so the AHRS converges to correct attitude during carrier hold
+            accel_body = Vector3f(0, 0, -GRAVITY_MSS);
+        }
+    }
 
     /*
       add in ground steering, this should be replaced with a proper
