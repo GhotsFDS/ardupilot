@@ -44,7 +44,7 @@ MAVLink.PLANE_FLIGHT_MODE = {MANUAL=0, CIRCLE=1, STABILIZE=2, TRAINING=3, ACRO=4
                                 AVOID_ADSB    = 14,GUIDED        = 15,INITIALISING  = 16,
                                 QSTABILIZE    = 17,QHOVER        = 18,QLOITER       = 19,QLAND         = 20,
                                 QRTL          = 21,QAUTOTUNE     = 22,QACRO         = 23,
-                                THERMAL       = 24,LOITER_ALT_QLAND = 25,AUTOLAND      = 26}
+                                THERMAL       = 24,LOITER_ALT_QLAND = 25,AUTOLAND      = 26,STT     = 27}
 
 function MAVLink.NaN()
     return 0/0

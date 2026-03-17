@@ -145,6 +145,9 @@ Plane::Plane(const char *frame_str) :
         // sideslip-roll coupling: cruciform symmetric → zero
         coefficient.c_l_b = 0;
 
+        // yaw rate-roll coupling: cruciform symmetric → zero
+        coefficient.c_l_r = 0;
+
         // cruciform + config: rudder roll coupling near-zero for symmetric body
         coefficient.c_l_deltar = 0;
 
@@ -156,8 +159,14 @@ Plane::Plane(const char *frame_str) :
         // differential horizontal fins produce no net side force
         coefficient.c_y_deltaa = 0;
 
-        ::printf("Cruciform mode: c_n_deltar=%.4f c_n_r=%.2f c_n_b=%.3f (c/b=%.3f)\n",
-                 coefficient.c_n_deltar, coefficient.c_n_r, coefficient.c_n_b, ratio_cb);
+        // side force symmetry: c_y_b mirrors c_lift_a (sideslip → side force = AoA → lift)
+        coefficient.c_y_b = -coefficient.c_lift_a;
+
+        // rudder side force symmetry: c_y_deltar mirrors c_lift_deltae
+        coefficient.c_y_deltar = -coefficient.c_lift_deltae;
+
+        ::printf("Cruciform mode: c_n_deltar=%.4f c_n_r=%.2f c_n_b=%.3f c_y_b=%.3f (c/b=%.3f)\n",
+                 coefficient.c_n_deltar, coefficient.c_n_r, coefficient.c_n_b, coefficient.c_y_b, ratio_cb);
     }
 
     // air-start: disable ground constraints (position/velocity set on first update)
@@ -650,7 +659,7 @@ void Plane::update(const struct sitl_input &input)
     // air-start: carrier hold — override state AFTER physics to prevent drift
     if (coefficient.initial_alt_offset > 0 && air_start_done && !carrier_released) {
         float throttle = filtered_servo_range(input, 2);
-        if (throttle >= 0.5f) {
+        if (throttle >= 0.1f) {
             carrier_released = true;
             ::printf("Air-start: RELEASED at %.0fm AGL, throttle=%.0f%%\n",
                      -position.z, throttle * 100);

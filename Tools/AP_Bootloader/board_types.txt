@@ -377,6 +377,10 @@ AP_HW_HGLRCF405V4                    1524
 AP_HW_F4BY_F427                      1530
 AP_HW_F4BY_H743                      1531
 
+AP_HW_FuSha-F405-V1                  1550
+
+AP_HW_FuSha-V6X-V1                   1600
+
 # IDs 1800-1809 reserved for Aerium Systems
 AP_HW_AERIUM_RADIAN_F405             1800
 AP_HW_AERIUM_RADIAN_H743             1801
@@ -569,3 +573,4 @@ AP_HW_CUBEORANGEPLUS_ODID           11063
 
 # do not allocate board IDs above 10,000 for non-ODID boards.
 # do not allocate board IDs above 19,999 in this file.
+
