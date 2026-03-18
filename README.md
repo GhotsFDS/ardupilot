@@ -1,162 +1,155 @@
-# ArduPilot Project
+# ArduPilot 4.6 — STT 精确制导弹药定制分支
 
-<a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">
+基于 ArduPilot 4.6 的 **Skid-To-Turn (STT) 低成本精确制导弹药** 飞控固件。
 
-[![Test Copter](https://github.com/ArduPilot/ardupilot/workflows/test%20copter/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_copter.yml) [![Test Plane](https://github.com/ArduPilot/ardupilot/workflows/test%20plane/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_plane.yml) [![Test Rover](https://github.com/ArduPilot/ardupilot/workflows/test%20rover/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_rover.yml) [![Test Sub](https://github.com/ArduPilot/ardupilot/workflows/test%20sub/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_sub.yml) [![Test Tracker](https://github.com/ArduPilot/ardupilot/workflows/test%20tracker/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_tracker.yml)
+弹体构型：十字翼尾翼 + 十字翼主翼，14kg，火箭助推后无动力滑翔，半主动激光末制导。
 
-[![Test AP_Periph](https://github.com/ArduPilot/ardupilot/workflows/test%20ap_periph/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_sitl_periph.yml) [![Test Chibios](https://github.com/ArduPilot/ardupilot/workflows/test%20chibios/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_chibios.yml) [![Test Linux SBC](https://github.com/ArduPilot/ardupilot/workflows/test%20Linux%20SBC/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_linux_sbc.yml) [![Test Replay](https://github.com/ArduPilot/ardupilot/workflows/test%20replay/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_replay.yml)
+## 定制内容概览
 
-[![Test Unit Tests](https://github.com/ArduPilot/ardupilot/workflows/test%20unit%20tests%20and%20sitl%20building/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_unit_tests.yml)[![test size](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml/badge.svg)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_size.yml)
+| 模块 | 路径 | 说明 |
+|------|------|------|
+| AP_STTSeeker | `libraries/AP_STTSeeker/` | 1.064μm 半主动激光导引头 RS-422 驱动 |
+| AP_STTCarrier | `libraries/AP_STTCarrier/` | 载机 RS-485 通信（目标坐标、激光编码、发射指令） |
+| AP_STTGuidance | `libraries/AP_STTGuidance/` | 中段 PID + 比例导引(PN) + 卡尔曼滤波 + 滚转 PD |
+| ModeSTT | `ArduPlane/mode_stt.cpp` | STT 飞行模式（零滚转约束，Lua 接管舵面） |
+| stt_mixer() | `ArduPlane/servos.cpp` | 十字翼 4 舵面混控（惯性→体轴旋转） |
+| Lua 绑定 | `bindings.desc` | 3 个单例暴露给 Lua：`stt_seeker` / `stt_carrier` / `stt_guidance` |
+| SITL 气动 | `libraries/SITL/SIM_Plane.cpp` | `-cruciform` 帧类型：俯仰/偏航气动对称 |
 
-[![Test Environment Setup](https://github.com/ArduPilot/ardupilot/actions/workflows/test_environment.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_environment.yml)
+## C++ 库
 
-[![Cygwin Build](https://github.com/ArduPilot/ardupilot/actions/workflows/cygwin_build.yml/badge.svg)](https://github.com/ArduPilot/ardupilot/actions/workflows/cygwin_build.yml) [![Macos Build](https://github.com/ArduPilot/ardupilot/actions/workflows/macos_build.yml/badge.svg)](https://github.com/ArduPilot/ardupilot/actions/workflows/macos_build.yml)
+### AP_STTSeeker — 导引头驱动
 
-[![Coverity Scan Build Status](https://scan.coverity.com/projects/5331/badge.svg)](https://scan.coverity.com/projects/ardupilot-ardupilot)
+- 协议：RS-422, 115200bps, 20Hz
+- 帧格式：`0x55 0xAA [帧ID] [数据] [校验]`
+- 输出：俯仰/偏航视线角 (LOS Angle)，捕获状态，盲区标志
+- 控制：允许/禁止捕获、激光编码绑定、AGC、门宽设置
 
-[![Test Coverage](https://github.com/ArduPilot/ardupilot/actions/workflows/test_coverage.yml/badge.svg?branch=master)](https://github.com/ArduPilot/ardupilot/actions/workflows/test_coverage.yml)
+### AP_STTCarrier — 载机通信
 
-[![Autotest Status](https://autotest.ardupilot.org/autotest-badge.svg)](https://autotest.ardupilot.org/)
+- 协议：RS-485, 115200bps, 半双工
+- 帧格式：`0xEB 0x90 [帧ID] [长度] [数据] [校验]`
+- 接收帧：挂装查询 (`0x01`)、目标坐标 (`0x02`)、激光编码 (`0x03`)、发射指令 (`0x04`)
+- 自动 ACK 应答
 
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10598/badge)](https://www.bestpractices.dev/projects/10598)
+### AP_STTGuidance — 制导算法
 
-ArduPilot is the most advanced, full-featured, and reliable open source autopilot software available.
-It has been under development since 2010 by a diverse team of professional engineers, computer scientists, and community contributors.
-Our autopilot software is capable of controlling almost any vehicle system imaginable, from conventional airplanes, quad planes, multi-rotors, and helicopters to rovers, boats, balance bots, and even submarines.
-It is continually being expanded to provide support for new emerging vehicle types.
+全部内部计算使用 `double` 精度（GPS 坐标 float 截断会导致 CEP 从 3.5m 退化到 14m）。
 
-## The ArduPilot project is made up of: ##
+**中段导航**：
+- 航向 PID + V² 速度增益缩放
+- 两阶段：GLIDE（平飞）→ DIVE（俯冲，导引头搜索距离内）
 
-- ArduCopter: [code](https://github.com/ArduPilot/ardupilot/tree/master/ArduCopter), [wiki](https://ardupilot.org/copter/index.html)
+**末段制导**：
+- GPS 惯性 PN（比例导引）+ 卡尔曼滤波估计 LOS 角速率
+- 几何前馈 + 导引头角度反馈 + 角速率阻尼
+- 全部 15 个末段增益可通过 `STT_G_T_*` 参数运行时调节
 
-- ArduPlane: [code](https://github.com/ArduPilot/ardupilot/tree/master/ArduPlane), [wiki](https://ardupilot.org/plane/index.html)
+**滚转稳定**：PD 控制 + V² 气动增益缩放
 
-- Rover: [code](https://github.com/ArduPilot/ardupilot/tree/master/Rover), [wiki](https://ardupilot.org/rover/index.html)
+### 十字翼混控 (stt_mixer)
 
-- ArduSub : [code](https://github.com/ArduPilot/ardupilot/tree/master/ArduSub), [wiki](http://ardusub.com/)
+```
+Lua → Script Motor 2/3/4 (pitch/roll/yaw, ±1)
+  → 惯性系→体轴旋转 (当前滚转角 φ)
+    → 4 舵面混合:
+       左翼 = pitch_body - roll
+       右翼 = pitch_body + roll
+       上翼 = yaw_body - roll
+       下翼 = yaw_body + roll
+```
 
-- Antenna Tracker : [code](https://github.com/ArduPilot/ardupilot/tree/master/AntennaTracker), [wiki](https://ardupilot.org/antennatracker/index.html)
+## 参数体系
 
-## User Support & Discussion Forums ##
+### Lua 参数表 (`STT_*`, idx 1-10)
 
-- Support Forum: <https://discuss.ardupilot.org/>
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `STT_PN_N` | 4.0 | PN 导航比 |
+| `STT_PN_ALPHA` | 0.4 | LOS 角速率滤波系数 |
+| `STT_MAX_G` | 15.0 | 最大过载 (g) |
+| `STT_BOOST_SPD` | 180 | 助推目标速度 (m/s) |
+| `STT_BOOST_TMO` | 30 | 助推超时 (s) |
+| `STT_CRR_SPD` | 33 | 载机携带速度 (m/s) |
+| `STT_GND_ALT` | 584 | 地面高度 MSL (m) |
+| `STT_SKR_DIST` | 2500 | 导引头搜索距离 (m) |
+| `STT_TGT_DIST` | 5000 | 目标距离 (m) |
+| `STT_BOOST_ALT` | 3000 | 助推高度 AGL (m) |
 
-- Community Site: <https://ardupilot.org>
+### C++ 制导增益 (`STT_G_*`, idx 1-26)
 
-## Developer Information ##
+**中段 (idx 1-5)**：`MID_H_KP/KI/KD`, `MID_P_KP`, `MID_VREF`
 
-- Github repository: <https://github.com/ArduPilot/ardupilot>
+**卡尔曼滤波 (idx 6-8)**：`KF_Q`, `KF_R`, `KF_MAXR`
 
-- Main developer wiki: <https://ardupilot.org/dev/>
+**滚转 (idx 9-10)**：`ROLL_KP`, `ROLL_KD`
 
-- Developer discussion: <https://discuss.ardupilot.org>
+**末段参考速度 (idx 11)**：`TRM_VREF`
 
-- Developer chat: <https://discord.com/channels/ardupilot>
+**末段增益 (idx 12-26)**：
 
-## Top Contributors ##
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `STT_G_T_FF_P1` | 0.30 | 俯仰前馈 (<300m) |
+| `STT_G_T_FF_P2` | 0.20 | 俯仰前馈 (300-500m) |
+| `STT_G_T_FF_P3` | 0.08 | 俯仰前馈 (>500m) |
+| `STT_G_T_RFF_G1` | 0.030 | 速率前馈 (<300m) |
+| `STT_G_T_RFF_G2` | 0.012 | 速率前馈 (>=300m) |
+| `STT_G_T_YAW_FF` | 0.020 | 偏航前馈增益 |
+| `STT_G_T_YAW_MAX` | 0.05 | 偏航指令限幅 |
+| `STT_G_T_PN_P` | 0.50 | PN 俯仰增益 |
+| `STT_G_T_PN_Y` | 0.0 | PN 偏航增益 |
+| `STT_G_T_SKR_P1` | 0.03 | 导引头俯仰 (<300m) |
+| `STT_G_T_SKR_P2` | 0.015 | 导引头俯仰 (300-1200m) |
+| `STT_G_T_KD_P_CL` | 0.003 | 俯仰阻尼 (<200m) |
+| `STT_G_T_KD_P_FR` | 0.010 | 俯仰阻尼 (>=200m) |
+| `STT_G_T_KD_Y_CL` | 0.005 | 偏航阻尼 (<300m) |
+| `STT_G_T_KD_Y_FR` | 0.015 | 偏航阻尼 (>=300m) |
 
-- [Flight code contributors](https://github.com/ArduPilot/ardupilot/graphs/contributors)
-- [Wiki contributors](https://github.com/ArduPilot/ardupilot_wiki/graphs/contributors)
-- [Most active support forum users](https://discuss.ardupilot.org/u?order=post_count&period=quarterly)
-- [Partners who contribute financially](https://ardupilot.org/about/Partners)
+## SITL 仿真
 
-## How To Get Involved ##
+### 气动模型
 
-- The ArduPilot project is open source and we encourage participation and code contributions: [guidelines for contributors to the ardupilot codebase](https://ardupilot.org/dev/docs/contributing.html)
+`-cruciform` 帧类型强制俯仰/偏航气动对称：
+- `c_n_b = |c_m_a| * (c/b)` — 静稳定性对称
+- `c_l_b = 0`, `c_l_r = 0` — 消除侧滑-滚转耦合
+- `Izz = Iyy` — 惯性矩对称
+- SERVO5-8 读取十字翼 4 舵面输出
 
-- We have an active group of Beta Testers to help us improve our code: [release procedures](https://ardupilot.org/dev/docs/release-procedures.html)
+### 构建与运行
 
-- Desired Enhancements and Bugs can be posted to the [issues list](https://github.com/ArduPilot/ardupilot/issues).
+```bash
+# 构建
+./waf configure --board sitl
+./waf build --target bin/arduplane
 
-- Help other users with log analysis in the [support forums](https://discuss.ardupilot.org/)
+# SITL 运行 (需配合 STT 仿真框架)
+cd STT
+python3 sim/auto_sim.py              # 单次仿真
+python3 sim/auto_sim.py --batch 10   # 批量统计
+```
 
-- Improve the wiki and chat with other [wiki editors on Discord #documentation](https://discord.com/channels/ardupilot)
+## 飞行阶段
 
-- Contact the developers on one of the [communication channels](https://ardupilot.org/copter/docs/common-contact-us.html)
+```
+PRE_LAUNCH → BOOST → MIDCOURSE (glide→dive) → TERMINAL → IMPACT
+   载机带飞     火箭助推    PID 航线控制         PN 精确制导    触地
+```
 
-## License ##
+1. **PRE_LAUNCH**：等待载机 RS-485 发射指令 + 目标坐标
+2. **BOOST**：继电器点火，全油门加速，航向初步修正
+3. **MIDCOURSE**：无动力滑翔，GPS 航向 PID，卡尔曼滤波预热
+4. **TERMINAL**：导引头锁定后切入，GPS-PN + 几何前馈 + 导引头反馈复合制导
+5. **IMPACT**：飞越检测（3D 距离连续递增 5 帧）触发
 
-The ArduPilot project is licensed under the GNU General Public
-License, version 3.
+## 硬件平台
 
-- [Overview of license](https://ardupilot.org/dev/docs/license-gplv3.html)
+- **飞控**：CUAV-X7 (STM32H743)
+- **导引头**：1.064μm 半主动激光，RS-422 (SERIAL5)
+- **载机接口**：RS-485 (SERIAL6)
+- **舵面**：4 × 十字翼舵机 (SERVO5-8)
 
-- [Full Text](https://github.com/ArduPilot/ardupilot/blob/master/COPYING.txt)
+## 基于 ArduPilot 4.6
 
-## Maintainers ##
-
-ArduPilot is comprised of several parts, vehicles and boards. The list below
-contains the people that regularly contribute to the project and are responsible
-for reviewing patches on their specific area.
-
-- [Andrew Tridgell](https://github.com/tridge):
-  - ***Vehicle***: Plane, AntennaTracker
-  - ***Board***: Pixhawk, Pixhawk2, PixRacer
-- [Francisco Ferreira](https://github.com/oxinarf):
-  - ***Bug Master***
-- [Grant Morphett](https://github.com/gmorph):
-  - ***Vehicle***: Rover
-- [Willian Galvani](https://github.com/williangalvani):
-  - ***Vehicle***: Sub
-  - ***Board***: Navigator
-- [Michael du Breuil](https://github.com/WickedShell):
-  - ***Subsystem***: Batteries
-  - ***Subsystem***: GPS
-  - ***Subsystem***: Scripting
-- [Peter Barker](https://github.com/peterbarker):
-  - ***Subsystem***: DataFlash, Tools
-- [Randy Mackay](https://github.com/rmackay9):
-  - ***Vehicle***: Copter, Rover, AntennaTracker
-- [Siddharth Purohit](https://github.com/bugobliterator):
-  - ***Subsystem***: CAN, Compass
-  - ***Board***: Cube*
-- [Tom Pittenger](https://github.com/magicrub):
-  - ***Vehicle***: Plane
-- [Bill Geyer](https://github.com/bnsgeyer):
-  - ***Vehicle***: TradHeli
-- [Emile Castelnuovo](https://github.com/emilecastelnuovo):
-  - ***Board***: VRBrain
-- [Georgii Staroselskii](https://github.com/staroselskii):
-  - ***Board***: NavIO
-- [Gustavo José de Sousa](https://github.com/guludo):
-  - ***Subsystem***: Build system
-- [Julien Beraud](https://github.com/jberaud):
-  - ***Board***: Bebop & Bebop 2
-- [Leonard Hall](https://github.com/lthall):
-  - ***Subsystem***: Copter attitude control and navigation
-- [Matt Lawrence](https://github.com/Pedals2Paddles):
-  - ***Vehicle***: 3DR Solo & Solo based vehicles
-- [Matthias Badaire](https://github.com/badzz):
-  - ***Subsystem***: FRSky
-- [Mirko Denecke](https://github.com/mirkix):
-  - ***Board***: BBBmini, BeagleBone Blue, PocketPilot
-- [Paul Riseborough](https://github.com/priseborough):
-  - ***Subsystem***: AP_NavEKF2
-  - ***Subsystem***: AP_NavEKF3
-- [Víctor Mayoral Vilches](https://github.com/vmayoral):
-  - ***Board***: PXF, Erle-Brain 2, PXFmini
-- [Amilcar Lucas](https://github.com/amilcarlucas):
-  - ***Subsystem***: Marvelmind
-- [Samuel Tabor](https://github.com/samuelctabor):
-  - ***Subsystem***: Soaring/Gliding
-- [Henry Wurzburg](https://github.com/Hwurzburg):
-  - ***Subsystem***: OSD
-  - ***Site***: Wiki
-- [Peter Hall](https://github.com/IamPete1):
-  - ***Vehicle***: Tailsitters
-  - ***Vehicle***: Sailboat
-  - ***Subsystem***: Scripting
-- [Andy Piper](https://github.com/andyp1per):
-  - ***Subsystem***: Crossfire
-  - ***Subsystem***: ESC
-  - ***Subsystem***: OSD
-  - ***Subsystem***: SmartAudio
-- [Alessandro Apostoli ](https://github.com/yaapu):
-  - ***Subsystem***: Telemetry
-  - ***Subsystem***: OSD
-- [Rishabh Singh ](https://github.com/rishabsingh3003):
-  - ***Subsystem***: Avoidance/Proximity
-- [David Bussenschutt ](https://github.com/davidbuzz):
-  - ***Subsystem***: ESP32,AP_HAL_ESP32
-- [Charles Villard ](https://github.com/Silvanosky):
-  - ***Subsystem***: ESP32,AP_HAL_ESP32
+本分支基于 [ArduPilot](https://github.com/ArduPilot/ardupilot) 4.6 版本。
+上游许可证：GPLv3。详见 [COPYING.txt](COPYING.txt)。
