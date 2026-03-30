@@ -174,11 +174,12 @@ Plane::Plane(const char *frame_str) :
     carrier_released = false;
     if (coefficient.initial_alt_offset > 0) {
         ground_behavior = GROUND_BEHAVIOR_NONE;
-        ::printf("Air-start configured: alt_offset=%.0fm vel=(%.1f,%.1f,%.1f)\n",
+        ::printf("Air-start configured: alt_offset=%.0fm vel=(%.1f,%.1f,%.1f) pitch=%.1fdeg\n",
                  coefficient.initial_alt_offset,
                  coefficient.initial_velocity.x,
                  coefficient.initial_velocity.y,
-                 coefficient.initial_velocity.z);
+                 coefficient.initial_velocity.z,
+                 coefficient.initial_pitch_angle);
     }
 }
 
@@ -268,6 +269,11 @@ void Plane::load_coeffs(const char *model_json)
         { "max_thrust", &coefficient.max_thrust, VarType::FLOAT },
         { "initial_alt_offset", &coefficient.initial_alt_offset, VarType::FLOAT },
         { "initial_velocity", &coefficient.initial_velocity, VarType::VECTOR3F },
+        { "initial_pitch_angle", &coefficient.initial_pitch_angle, VarType::FLOAT },
+        COFF_FLOAT(chute_cd),
+        COFF_FLOAT(chute_area),
+        COFF_FLOAT(chute_open_time),
+        COFF_FLOAT(chute_attach_x),
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(vars); i++) {
@@ -626,6 +632,40 @@ void Plane::calculate_forces(const struct sitl_input &input, Vector3f &rot_accel
         Vector3f vel_body = dcm.transposed() * velocity_ef;
         accel_body.x -= vel_body.x * 0.3f;
     }
+
+    // === Parachute drag model ===
+    // Detect SERVO9 (ScriptMotor5, FUNCTION=98) activation
+    if (!parachute_deployed && input.servos[8] > 1500) {
+        parachute_deployed = true;
+        parachute_deploy_ms = AP_HAL::millis64();
+        // re-enable ground collision for air-start models (GROUND_BEHAVIOR_NONE → FWD_ONLY)
+        ground_behavior = GROUND_BEHAVIOR_FWD_ONLY;
+        ::printf("Parachute deployed at %.0fm AGL, V=%.0fm/s\n",
+                 -position.z, velocity_ef.length());
+    }
+    if (parachute_deployed) {
+        float t_since = (AP_HAL::millis64() - parachute_deploy_ms) * 0.001f;
+        // inflation: linear ramp 0->1 over chute_open_time
+        float inflation = constrain_float(t_since / coefficient.chute_open_time, 0, 1);
+        float V = velocity_air_bf.length();
+        if (V > 0.1f) {
+            float q = 0.5f * air_density * V * V;
+            float F_chute = q * coefficient.chute_cd * coefficient.chute_area * inflation;
+            Vector3f drag_dir = -velocity_air_bf.normalized();
+            Vector3f chute_force = drag_dir * F_chute;
+            // add drag acceleration
+            accel_body += chute_force / mass;
+            // torque from off-CG attachment (stabilizing pitch moment)
+            Vector3f attach(coefficient.chute_attach_x, 0, 0);
+            Vector3f torque = attach % chute_force;
+            const auto &Ic = coefficient.moment_of_inertia;
+            if (!is_zero(Ic.x) && !is_zero(Ic.y) && !is_zero(Ic.z)) {
+                rot_accel.x += torque.x / Ic.x;
+                rot_accel.y += torque.y / Ic.y;
+                rot_accel.z += torque.z / Ic.z;
+            }
+        }
+    }
 }
     
 /*
@@ -637,15 +677,25 @@ void Plane::update(const struct sitl_input &input)
     if (coefficient.initial_alt_offset > 0 && !air_start_done) {
         position.zero();
         position.z = -coefficient.initial_alt_offset;
+        // decompose initial_velocity along pitch angle:
+        // horizontal component scales by cos(pitch), vertical from speed * sin(pitch)
+        // speed magnitude is always positive; nose-down (negative pitch) → positive Vz (downward in NED)
+        const float pitch_rad = radians(coefficient.initial_pitch_angle);
+        const float speed = coefficient.initial_velocity.length();
         velocity_ef = coefficient.initial_velocity;
-        dcm.from_euler(0, 0, radians(home_yaw));
+        velocity_ef.x = coefficient.initial_velocity.x * cosf(pitch_rad);
+        velocity_ef.y = coefficient.initial_velocity.y * cosf(pitch_rad);
+        velocity_ef.z = -speed * sinf(pitch_rad);  // nose-down (negative pitch) → positive Vz (downward)
+        dcm.from_euler(0, pitch_rad, radians(home_yaw));
         gyro.zero();
-        accel_body = Vector3f(0, 0, -GRAVITY_MSS);
+        // gravity in body frame at the given pitch angle
+        accel_body = Vector3f(GRAVITY_MSS * sinf(pitch_rad), 0, -GRAVITY_MSS * cosf(pitch_rad));
         air_start_done = true;
         carrier_released = false;
-        ::printf("Air-start: carrier hold at %.0fm AGL, V=(%.1f,%.1f,%.1f)\n",
+        ::printf("Air-start: carrier hold at %.0fm AGL, V=(%.1f,%.1f,%.1f), pitch=%.1fdeg\n",
                  coefficient.initial_alt_offset,
-                 velocity_ef.x, velocity_ef.y, velocity_ef.z);
+                 velocity_ef.x, velocity_ef.y, velocity_ef.z,
+                 coefficient.initial_pitch_angle);
     }
 
     Vector3f rot_accel;
@@ -667,12 +717,17 @@ void Plane::update(const struct sitl_input &input)
             // freeze all state: position, velocity, attitude, angular rate, accel
             position.zero();
             position.z = -coefficient.initial_alt_offset;
+            const float pitch_rad = radians(coefficient.initial_pitch_angle);
+            const float speed = coefficient.initial_velocity.length();
             velocity_ef = coefficient.initial_velocity;
-            dcm.from_euler(0, 0, radians(home_yaw));
+            velocity_ef.x = coefficient.initial_velocity.x * cosf(pitch_rad);
+            velocity_ef.y = coefficient.initial_velocity.y * cosf(pitch_rad);
+            velocity_ef.z = -speed * sinf(pitch_rad);
+            dcm.from_euler(0, pitch_rad, radians(home_yaw));
             gyro.zero();
-            // reset accelerometer to level flight (gravity only, no aero forces)
+            // reset accelerometer to gravity at the given pitch angle
             // so the AHRS converges to correct attitude during carrier hold
-            accel_body = Vector3f(0, 0, -GRAVITY_MSS);
+            accel_body = Vector3f(GRAVITY_MSS * sinf(pitch_rad), 0, -GRAVITY_MSS * cosf(pitch_rad));
         }
     }
 

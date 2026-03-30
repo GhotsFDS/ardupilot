@@ -1151,3 +1151,66 @@ userdata DroneCAN_Handle method subscribe boolean
 userdata DroneCAN_Handle manual check_message DroneCAN_Handle::check_message 0 4
 userdata DroneCAN_Handle manual_operator __gc DroneCAN_Handle::__gc
 
+-- ----AP_STTSeeker Library----
+include AP_STTSeeker/AP_STTSeeker.h depends AP_STT_SEEKER_ENABLED
+include AP_STTSeeker/AP_STTSeeker_config.h
+
+singleton AP_STTSeeker depends AP_STT_SEEKER_ENABLED
+singleton AP_STTSeeker rename stt_seeker
+singleton AP_STTSeeker method init boolean uint8_t 0 9
+singleton AP_STTSeeker method update void
+singleton AP_STTSeeker method is_captured boolean
+singleton AP_STTSeeker method is_angle_valid boolean
+singleton AP_STTSeeker method get_pitch_deg float
+singleton AP_STTSeeker method get_yaw_deg float
+singleton AP_STTSeeker method get_status uint8_t
+singleton AP_STTSeeker method get_last_rx_ms uint32_t
+singleton AP_STTSeeker method get_rx_count uint16_t
+singleton AP_STTSeeker method get_err_count uint16_t
+singleton AP_STTSeeker method allow_capture void
+singleton AP_STTSeeker method forbid_capture void
+singleton AP_STTSeeker method reset void
+singleton AP_STTSeeker method code_bind void uint8_t 0 255 uint32_t'skip_check
+singleton AP_STTSeeker method set_period_precision void uint8_t 0 255
+singleton AP_STTSeeker method agc_dynamic void
+singleton AP_STTSeeker method agc_fixed void uint8_t 0 255
+singleton AP_STTSeeker method gate_width void uint8_t 0 255 uint8_t 0 255
+
+-- ----AP_STTCarrier Library----
+include AP_STTCarrier/AP_STTCarrier.h depends AP_STT_CARRIER_ENABLED
+include AP_STTCarrier/AP_STTCarrier_config.h
+
+singleton AP_STTCarrier depends AP_STT_CARRIER_ENABLED
+singleton AP_STTCarrier rename stt_carrier
+singleton AP_STTCarrier method init boolean uint8_t 0 9
+singleton AP_STTCarrier method update void
+singleton AP_STTCarrier method is_connected boolean
+singleton AP_STTCarrier method is_launch_commanded boolean
+singleton AP_STTCarrier method has_target boolean
+singleton AP_STTCarrier method get_target_lat_deg float
+singleton AP_STTCarrier method get_target_lon_deg float
+singleton AP_STTCarrier method get_target_alt_m float
+singleton AP_STTCarrier method get_laser_code_type uint8_t
+singleton AP_STTCarrier method get_laser_code_param uint8_t
+singleton AP_STTCarrier method get_rx_count uint16_t
+singleton AP_STTCarrier method get_err_count uint16_t
+singleton AP_STTCarrier method get_last_rx_ms uint32_t
+
+-- ----AP_STTGuidance Library----
+include AP_STTGuidance/AP_STTGuidance.h depends AP_STT_GUIDANCE_ENABLED
+include AP_STTGuidance/AP_STTGuidance_config.h
+
+singleton AP_STTGuidance depends AP_STT_GUIDANCE_ENABLED
+singleton AP_STTGuidance rename stt_guidance
+singleton AP_STTGuidance method mid_init void float'skip_check float'skip_check float'skip_check float'skip_check
+singleton AP_STTGuidance method mid_update boolean float'skip_check float'skip_check float'skip_check float'skip_check float'skip_check float'skip_check uint32_t'skip_check float'Null float'Null
+singleton AP_STTGuidance method mid_get_distance float float'skip_check float'skip_check
+singleton AP_STTGuidance method mid_get_phase uint8_t
+singleton AP_STTGuidance method mid_get_heading_integral float
+singleton AP_STTGuidance method mid_yaw_update boolean float'skip_check float'skip_check float'skip_check uint32_t'skip_check float'Null
+singleton AP_STTGuidance method pn_init void float'skip_check float'skip_check float'skip_check
+singleton AP_STTGuidance method pn_update boolean float'skip_check float'skip_check float'skip_check uint32_t'skip_check float'Null float'Null
+singleton AP_STTGuidance method pn_get_los_rates boolean float'Null float'Null
+singleton AP_STTGuidance method pn_get_accel_g boolean float'Null float'Null
+singleton AP_STTGuidance method roll_stabilize float float'skip_check float'skip_check float'skip_check float'skip_check
+

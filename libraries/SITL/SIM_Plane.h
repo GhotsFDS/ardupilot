@@ -96,6 +96,12 @@ protected:
         // air-start: launch from altitude with initial velocity (for missiles)
         float initial_alt_offset = 0;               // 0 = ground start; >0 = start at this AGL (m)
         Vector3f initial_velocity{0, 0, 0};          // NED initial velocity (m/s)
+        float initial_pitch_angle = 0;              // initial pitch angle in degrees (negative = nose down)
+        // Parachute recovery model (from aero_model.json)
+        float chute_cd = 1.4;          // drag coefficient (round chute ~1.4)
+        float chute_area = 6.0;        // reference area (m²), diameter ~2.8m
+        float chute_open_time = 2.0;   // inflation time (s)
+        float chute_attach_x = -0.5;   // attachment aft of CG (m, negative=tail)
     } default_coefficients;
 
     struct Coefficients coefficient;
@@ -103,6 +109,8 @@ protected:
     float thrust_scale;
     bool air_start_done;
     bool carrier_released;
+    bool parachute_deployed = false;
+    uint64_t parachute_deploy_ms = 0;
     bool reverse_thrust;
     bool elevons;
     bool vtail;

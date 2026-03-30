@@ -371,7 +371,10 @@ public:
         k_param_mode_autoland,
         k_param__gcs,
 
-        k_param_stt_controller = 274,
+        // k_param 274 was stt_controller (removed)
+        k_param_stt_seeker     = 275,
+        k_param_stt_carrier    = 276,
+        k_param_stt_guidance   = 277,
 
     };
 

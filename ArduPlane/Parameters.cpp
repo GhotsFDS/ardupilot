@@ -987,7 +987,9 @@ const AP_Param::Info Plane::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
-    GOBJECT(stt_controller, "STT_",  AP_STTController),
+#if AP_STT_GUIDANCE_ENABLED
+    GOBJECT(stt_guidance,   "STT_G_", AP_STTGuidance),
+#endif
 
     AP_VAREND
 };

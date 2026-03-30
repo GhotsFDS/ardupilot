@@ -59,7 +59,9 @@
 #include <AP_Navigation/AP_Navigation.h>
 #include <AP_L1_Control/AP_L1_Control.h>
 #include <AP_RCMapper/AP_RCMapper.h>        // RC input mapping library
-#include <AP_STTController/AP_STTController.h>
+#include <AP_STTSeeker/AP_STTSeeker.h>
+#include <AP_STTCarrier/AP_STTCarrier.h>
+#include <AP_STTGuidance/AP_STTGuidance.h>
 
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_TECS/AP_TECS.h>
@@ -253,7 +255,15 @@ private:
     AP_YawController yawController{aparm};
     AP_SteerController steerController{};
 
-    AP_STTController stt_controller{}; 
+#if AP_STT_SEEKER_ENABLED
+    AP_STTSeeker stt_seeker;
+#endif
+#if AP_STT_CARRIER_ENABLED
+    AP_STTCarrier stt_carrier;
+#endif
+#if AP_STT_GUIDANCE_ENABLED
+    AP_STTGuidance stt_guidance;
+#endif
 
     // Training mode
     bool training_manual_roll;  // user has manual roll control

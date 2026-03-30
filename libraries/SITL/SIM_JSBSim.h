@@ -69,7 +69,8 @@ private:
     enum {
         FRAME_NORMAL,
         FRAME_ELEVON,
-        FRAME_VTAIL
+        FRAME_VTAIL,
+        FRAME_CRUCIFORM
     } frame;
 
     bool create_templates(void);

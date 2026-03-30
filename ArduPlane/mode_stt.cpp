@@ -1,43 +1,51 @@
 #include "mode.h"
 #include "Plane.h"
 
+/*
+  STT mode — Skid-To-Turn guided munition mode
+
+  Core design: Lua scripting owns the flight phase state machine and writes
+  pitch/yaw/roll/throttle commands to Script Motor functions (94-97).
+  The C++ mode_stt only provides:
+    1. Lock nav_roll_cd = 0 (STT zero-roll constraint)
+    2. Disable ArduPilot's standard attitude controller output
+       (Lua writes directly to SRV channels via stt_mixer)
+    3. Allow stt_mixer() in servos.cpp to run (inertial→body rotation + 4-fin mix)
+
+  The standard attitude stabilization (Mode::run → stabilize_xxx) is intentionally
+  NOT called here — Lua + C++ libraries (AP_STTGuidance) handle all stabilization.
+  ArduPilot's PID controllers (rollController, pitchController, yawController) are
+  bypassed; the only servo output comes from Lua → k_scripting2/3/4 → stt_mixer().
+*/
+
 bool ModeSTT::_enter()
 {
+    // Force zero roll target
+    plane.nav_roll_cd = 0;
+    plane.nav_pitch_cd = 0;
+
     return true;
 }
 
-/*
-  STT 模式：类似 FBWA 但强制零滚转
-  - 利用 ArduPilot 标准 PID 控制器（含 speed_scaler、积分器、前馈）
-  - 滚转锁零，俯仰/偏航由打杆或 Lua 脚本控制
-  - C-tail 混控由 stt_mixer()（纯输出混控器）自动完成
-*/
 void ModeSTT::update()
 {
-    // 锁定零滚转（STT 核心：全程零滚转，用 pitch+yaw 合成任意方向机动）
+    // Lock zero roll — STT core: all maneuvering through pitch + yaw
     plane.nav_roll_cd = 0;
 
-    // 俯仰：跟 FBWA 一样由打杆控制（Lua 可通过 guided/set_target_altitude 覆盖）
-    float pitch_input = plane.channel_pitch->norm_input();
-    if (pitch_input > 0) {
-        plane.nav_pitch_cd = pitch_input * plane.aparm.pitch_limit_max * 100;
-    } else {
-        plane.nav_pitch_cd = -(pitch_input * plane.pitch_limit_min * 100);
-    }
-    plane.adjust_nav_pitch_throttle();
-    plane.nav_pitch_cd = constrain_int32(plane.nav_pitch_cd,
-                                         plane.pitch_limit_min * 100,
-                                         plane.aparm.pitch_limit_max.get() * 100);
+    // nav_pitch_cd is not used (Lua controls pitch directly via Script Motor),
+    // but set to zero to avoid stale values in logs
+    plane.nav_pitch_cd = 0;
 }
 
 void ModeSTT::run()
 {
-    // 标准姿态稳定（含 speed_scaler）— 写 k_aileron/k_elevator/k_rudder
-    Mode::run();
+    // Do NOT call Mode::run() — it would run stabilize_roll/pitch/yaw
+    // which writes to k_aileron/k_elevator/k_rudder, conflicting with
+    // Lua's Script Motor outputs (k_scripting2/3/4).
 
-    // 模式层更新（零滚转 + 俯仰指令）
     update();
 
-    // 油门按飞手打杆输出
-    output_pilot_throttle();
+    // Throttle: Lua controls via Script Motor 1 (k_scripting → FUNC 94).
+    // Set ArduPilot throttle to zero so it doesn't interfere.
+    SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, 0);
 }
