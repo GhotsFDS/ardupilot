@@ -30,6 +30,7 @@ def build(bld):
             'AP_STTSeeker',
             'AP_STTCarrier',
             'AP_STTGuidance',
+            'AP_STTVirtualSeeker',
 
         ],
     )

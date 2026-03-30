@@ -26,6 +26,11 @@ public:
     float get_target_lon_deg() const { return _state.target_lon * 1e-7f; }
     float get_target_alt_m() const { return _state.target_alt_cm * 0.01f; }
 
+    // double-precision access (avoid float truncation for C++ guidance)
+    int32_t get_target_lat_int32() const { return _state.target_lat; }
+    int32_t get_target_lon_int32() const { return _state.target_lon; }
+    int32_t get_target_alt_cm() const { return _state.target_alt_cm; }
+
     uint8_t get_laser_code_type() const { return _state.laser_code_type; }
     uint8_t get_laser_code_param() const { return _state.laser_code_param; }
 

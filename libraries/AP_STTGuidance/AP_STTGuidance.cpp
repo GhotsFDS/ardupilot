@@ -139,6 +139,16 @@ const AP_Param::GroupInfo AP_STTGuidance::var_info[] = {
     // @Range: 0.001 0.05
     AP_GROUPINFO("T_KD_Y_FR", 26, AP_STTGuidance, t_kd_y_fr, 0.015f),
 
+    // @Param: SKR_SRC
+    // @DisplayName: Seeker source (0=real RS-422, 1=virtual GPS)
+    // @Range: 0 1
+    AP_GROUPINFO("SKR_SRC", 27, AP_STTGuidance, skr_src, 0),
+
+    // @Param: TRM_CPP
+    // @DisplayName: Terminal mode (0=Lua 50Hz, 1=C++ 300Hz)
+    // @Range: 0 1
+    AP_GROUPINFO("TRM_CPP", 28, AP_STTGuidance, trm_cpp, 0),
+
     AP_GROUPEND
 };
 

@@ -1113,10 +1113,13 @@ void Plane::servos_output(void)
 
     xtail_mixer();
 
-    // if (control_mode->mode_number() == Mode::Number::STT) {
-    //     stt_mixer();  // STT 模式才混控
-    // }
-    stt_mixer();  // STT 模式才混控
+    // 300Hz terminal guidance (before stt_mixer so mixer reads fresh values)
+#if AP_STT_GUIDANCE_ENABLED
+    if (stt_guidance.terminal_is_active()) {
+        stt_guidance.terminal_update(AP_HAL::millis());
+    }
+#endif
+    stt_mixer();
 
 #if HAL_QUADPLANE_ENABLED
     // cope with tailsitters and bicopters

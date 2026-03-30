@@ -1213,4 +1213,29 @@ singleton AP_STTGuidance method pn_update boolean float'skip_check float'skip_ch
 singleton AP_STTGuidance method pn_get_los_rates boolean float'Null float'Null
 singleton AP_STTGuidance method pn_get_accel_g boolean float'Null float'Null
 singleton AP_STTGuidance method roll_stabilize float float'skip_check float'skip_check float'skip_check float'skip_check
+singleton AP_STTGuidance method terminal_init void float'skip_check float'skip_check float'skip_check
+singleton AP_STTGuidance method terminal_update uint8_t uint32_t'skip_check
+singleton AP_STTGuidance method terminal_get_status uint8_t
+singleton AP_STTGuidance method terminal_is_active boolean
+singleton AP_STTGuidance method terminal_stop void
+singleton AP_STTGuidance method terminal_get_best_dist float
+singleton AP_STTGuidance method terminal_get_best_h float
+singleton AP_STTGuidance method terminal_get_best_v float
+
+-- ----AP_STTVirtualSeeker Library----
+include AP_STTVirtualSeeker/AP_STTVirtualSeeker.h depends AP_STT_VIRTUAL_SEEKER_ENABLED
+include AP_STTVirtualSeeker/AP_STTVirtualSeeker_config.h
+
+singleton AP_STTVirtualSeeker depends AP_STT_VIRTUAL_SEEKER_ENABLED
+singleton AP_STTVirtualSeeker rename stt_virtual_seeker
+singleton AP_STTVirtualSeeker method update void
+singleton AP_STTVirtualSeeker method is_captured boolean
+singleton AP_STTVirtualSeeker method is_angle_valid boolean
+singleton AP_STTVirtualSeeker method get_pitch_deg float
+singleton AP_STTVirtualSeeker method get_yaw_deg float
+singleton AP_STTVirtualSeeker method get_dist_3d float
+singleton AP_STTVirtualSeeker method get_h_dist float
+singleton AP_STTVirtualSeeker method allow_capture void
+singleton AP_STTVirtualSeeker method forbid_capture void
+singleton AP_STTVirtualSeeker method reset void
 

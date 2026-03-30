@@ -46,6 +46,17 @@ public:
     float roll_stabilize(float roll_deg, float roll_rate_dps,
                          float airspeed, float v_ref) const;
 
+    // === terminal guidance (C++ 300Hz path) ===
+    // Lua passes float; internally stored as double via carrier int32
+    void terminal_init(float target_lat, float target_lon, float target_alt);
+    uint8_t terminal_update(uint32_t now_ms);  // 0=running, 1=impact
+    uint8_t terminal_get_status() const { return _trm.status; }
+    bool terminal_is_active() const { return _trm.active; }
+    void terminal_stop() { _trm.active = false; }
+    float terminal_get_best_dist() const { return float(_trm.best_dist_3d); }
+    float terminal_get_best_h() const { return float(_trm.best_h_dist); }
+    float terminal_get_best_v() const { return float(_trm.best_v_dist); }
+
     // AP_Param: all STT_ gains
     AP_Float mid_h_kp;
     AP_Float mid_h_ki;
@@ -75,6 +86,10 @@ public:
     AP_Float t_kd_p_fr;     // pitch damping (>=200m)
     AP_Float t_kd_y_cl;     // yaw damping (<300m)
     AP_Float t_kd_y_fr;     // yaw damping (>=300m)
+
+    // new params for terminal C++ mode and seeker source
+    AP_Int8  skr_src;       // 0=real RS-422, 1=virtual GPS
+    AP_Int8  trm_cpp;       // 0=Lua terminal, 1=C++ 300Hz terminal
 
 private:
     // --- midcourse state ---
@@ -133,6 +148,26 @@ private:
     void _kf_predict(KFState &kf, double dt, double q_spec, double r_meas);
     bool _kf_update(KFState &kf, double z, double r_meas);
     void _pn_accel_to_cmd(double a_pitch, double a_yaw, float &pitch_cmd, float &yaw_cmd) const;
+
+    // --- terminal guidance state ---
+    struct TerminalState {
+        bool active = false;
+        uint8_t status = 0;       // 0=running, 1=impact
+        double target_lat = 0;
+        double target_lon = 0;
+        double target_alt = 0;
+        double best_dist_3d = 999999;
+        double best_h_dist = 999999;
+        double best_v_dist = 999999;
+        double prev_dist_3d = 999999;
+        uint32_t dist_inc_start_ms = 0;   // time-based flyover detection
+        double last_yaw_cmd = 0;
+        uint32_t last_ms = 0;
+        // PN decimation: keep PN at ~50Hz while rest runs at 300Hz
+        uint32_t last_pn_ms = 0;
+        double pn_pitch_cmd = 0;
+        double pn_yaw_cmd = 0;
+    } _trm;
 
     // --- GPS helpers (double precision) ---
     static double _gps_distance(double lat1, double lon1, double lat2, double lon2);

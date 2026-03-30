@@ -990,6 +990,9 @@ const AP_Param::Info Plane::var_info[] = {
 #if AP_STT_GUIDANCE_ENABLED
     GOBJECT(stt_guidance,   "STT_G_", AP_STTGuidance),
 #endif
+#if AP_STT_VIRTUAL_SEEKER_ENABLED
+    GOBJECT(stt_virtual_seeker, "STT_VS_", AP_STTVirtualSeeker),
+#endif
 
     AP_VAREND
 };

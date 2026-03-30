@@ -62,6 +62,7 @@
 #include <AP_STTSeeker/AP_STTSeeker.h>
 #include <AP_STTCarrier/AP_STTCarrier.h>
 #include <AP_STTGuidance/AP_STTGuidance.h>
+#include <AP_STTVirtualSeeker/AP_STTVirtualSeeker.h>
 
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_TECS/AP_TECS.h>
@@ -263,6 +264,9 @@ private:
 #endif
 #if AP_STT_GUIDANCE_ENABLED
     AP_STTGuidance stt_guidance;
+#endif
+#if AP_STT_VIRTUAL_SEEKER_ENABLED
+    AP_STTVirtualSeeker stt_virtual_seeker;
 #endif
 
     // Training mode
