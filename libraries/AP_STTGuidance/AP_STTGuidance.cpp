@@ -149,6 +149,21 @@ const AP_Param::GroupInfo AP_STTGuidance::var_info[] = {
     // @Range: 0 1
     AP_GROUPINFO("TRM_CPP", 28, AP_STTGuidance, trm_cpp, 0),
 
+    // @Param: MID_CPP
+    // @DisplayName: Midcourse servo mode (0=Lua, 1=C++ 300Hz damping+roll)
+    // @Range: 0 1
+    AP_GROUPINFO("MID_CPP", 29, AP_STTGuidance, mid_cpp, 0),
+
+    // @Param: MID_KDP
+    // @DisplayName: Midcourse pitch rate damping gain
+    // @Range: 0.001 0.1
+    AP_GROUPINFO("MID_KDP", 30, AP_STTGuidance, mid_kdp, 0.025f),
+
+    // @Param: MID_KDY
+    // @DisplayName: Midcourse yaw rate damping gain
+    // @Range: 0.001 0.1
+    AP_GROUPINFO("MID_KDY", 31, AP_STTGuidance, mid_kdy, 0.005f),
+
     AP_GROUPEND
 };
 

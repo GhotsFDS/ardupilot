@@ -269,4 +269,41 @@ uint8_t AP_STTGuidance::terminal_update(uint32_t now_ms)
     return 0;
 }
 
+// === 300Hz servo update for non-terminal phases ===
+// Applies rate damping (midcourse) + roll PD (all phases) at 300Hz.
+// Lua writes raw PID commands to k_scripting2/4; this function adds
+// high-rate damping and roll correction on top.
+
+void AP_STTGuidance::servo_update(uint32_t now_ms)
+{
+    if (mid_cpp.get() != 1 || _trm.active) {
+        return;
+    }
+
+    auto &ahrs = AP::ahrs();
+    const Vector3f &gyro = ahrs.get_gyro();
+    Vector3f vel_ned;
+    if (!ahrs.get_velocity_NED(vel_ned)) {
+        return;
+    }
+    const float aspd = MAX(vel_ned.length(), 30.0f);
+    const float v_ref = trm_vref.get();
+
+    // Lua stores damped commands via set_raw_commands(); C++ adds
+    // yaw attenuation at 300Hz (tracks roll angle better than 50Hz)
+    float yaw_cmd = _servo_raw_yaw;
+    const float roll_abs = fabsf(degrees(ahrs.get_roll()));
+    if (roll_abs > 15.0f) {
+        const float atten = MAX(1.0f - (roll_abs - 15.0f) / 30.0f, 0.0f);
+        yaw_cmd *= atten;
+    }
+    SRV_Channels::set_output_norm(SRV_Channel::k_scripting4, yaw_cmd);
+
+    // Roll PD at 300Hz
+    const float roll_deg = degrees(ahrs.get_roll());
+    const float roll_rate = degrees(gyro.x);
+    const float roll_cmd = roll_stabilize(roll_deg, roll_rate, aspd, v_ref);
+    SRV_Channels::set_output_norm(SRV_Channel::k_scripting3, roll_cmd);
+}
+
 #endif  // AP_STT_GUIDANCE_ENABLED

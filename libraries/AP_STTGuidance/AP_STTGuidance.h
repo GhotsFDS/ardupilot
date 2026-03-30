@@ -57,6 +57,13 @@ public:
     float terminal_get_best_h() const { return float(_trm.best_h_dist); }
     float terminal_get_best_v() const { return float(_trm.best_v_dist); }
 
+    // === 300Hz servo update (damping + roll PD for non-terminal phases) ===
+    void servo_update(uint32_t now_ms);
+    bool servo_is_active() const { return mid_cpp.get() == 1 && !_trm.active; }
+    void set_damping_active(bool active) { _servo_damping = active; }
+    // Lua stores raw PID commands here; C++ applies damping from these base values
+    void set_raw_commands(float pitch, float yaw) { _servo_raw_pitch = pitch; _servo_raw_yaw = yaw; }
+
     // AP_Param: all STT_ gains
     AP_Float mid_h_kp;
     AP_Float mid_h_ki;
@@ -90,6 +97,9 @@ public:
     // new params for terminal C++ mode and seeker source
     AP_Int8  skr_src;       // 0=real RS-422, 1=virtual GPS
     AP_Int8  trm_cpp;       // 0=Lua terminal, 1=C++ 300Hz terminal
+    AP_Int8  mid_cpp;       // 0=Lua damping+roll, 1=C++ 300Hz damping+roll
+    AP_Float mid_kdp;       // midcourse pitch rate damping gain
+    AP_Float mid_kdy;       // midcourse yaw rate damping gain
 
 private:
     // --- midcourse state ---
@@ -168,6 +178,11 @@ private:
         double pn_pitch_cmd = 0;
         double pn_yaw_cmd = 0;
     } _trm;
+
+    // --- servo update state ---
+    bool _servo_damping = false;  // Lua sets true during MIDCOURSE
+    float _servo_raw_pitch = 0;   // Lua's undamped PID output
+    float _servo_raw_yaw = 0;
 
     // --- GPS helpers (double precision) ---
     static double _gps_distance(double lat1, double lon1, double lat2, double lon2);

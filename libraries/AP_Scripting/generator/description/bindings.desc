@@ -1221,6 +1221,9 @@ singleton AP_STTGuidance method terminal_stop void
 singleton AP_STTGuidance method terminal_get_best_dist float
 singleton AP_STTGuidance method terminal_get_best_h float
 singleton AP_STTGuidance method terminal_get_best_v float
+singleton AP_STTGuidance method servo_is_active boolean
+singleton AP_STTGuidance method set_damping_active void boolean
+singleton AP_STTGuidance method set_raw_commands void float'skip_check float'skip_check
 
 -- ----AP_STTVirtualSeeker Library----
 include AP_STTVirtualSeeker/AP_STTVirtualSeeker.h depends AP_STT_VIRTUAL_SEEKER_ENABLED
