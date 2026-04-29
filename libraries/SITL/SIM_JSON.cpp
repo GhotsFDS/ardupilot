@@ -589,8 +589,82 @@ void JSON::recv_fdm(const struct sitl_input &input)
 /*
    update the JSON simulation by one time step
 */
+/*
+   MantaShark fork: receive RCIN as binary UDP packet (16 × uint16 LE = 32 bytes)
+   on port = sitl->rcin_port (default 5501). Drains all pending packets each frame.
+   Writes into state.rc[] so the main rc handling block in recv_fdm output
+   (rcin_chan_count + memcpy fdm.rcin) picks it up.
+
+   Why this exists: ardupilot_gazebo plugin doesn't emit "rc" field in fdm JSON,
+   and mavlink RC_CHANNELS_OVERRIDE races with channel.update() in JSON SITL
+   (lua sees override but ArduPlane main loop sees control_in=0). This UDP path
+   gives a continuous RC source so AP_RCProtocol_FDM keeps active and rc channels
+   update normally.
+*/
+void JSON::recv_rcin(void)
+{
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    if (sitl == nullptr) {
+        return;
+    }
+    if (!rcin_sock_bound) {
+        rcin_sock.set_blocking(false);
+        rcin_sock.reuseaddress();
+        // Use rcin_port + 2 to avoid race with AP_RCProtocol_UDP on rcin_port.
+        // Default: 5503. mavproxy --sitl 5503 or raw UDP send 16ch binary here.
+        const uint16_t port = sitl->rcin_port + 2;
+        if (!rcin_sock.bind("0.0.0.0", port)) {
+            static bool warned = false;
+            if (!warned) {
+                printf("SIM_JSON: rcin bind failed on port %u\n", (unsigned)port);
+                warned = true;
+            }
+            rcin_sock_bound = true; // don't retry
+            return;
+        }
+        printf("SIM_JSON: RCIN listening on UDP %u (binary 16ch, MantaShark fork)\n",
+               (unsigned)port);
+        rcin_sock_bound = true;
+    }
+
+    // Drain all pending packets, last one wins.
+    uint16_t pwm[16];
+    bool got_any = false;
+    ssize_t n;
+    while ((n = rcin_sock.recv(pwm, sizeof(pwm), 0)) > 0) {
+        if (n == sizeof(pwm) || n == 8 * sizeof(uint16_t)) {
+            const uint8_t count = MIN((uint8_t)(n / sizeof(uint16_t)),
+                                       (uint8_t)ARRAY_SIZE(state.rc));
+            for (uint8_t i = 0; i < count; i++) {
+                if (pwm[i] != 0) {
+                    state.rc[i] = (float)pwm[i];
+                }
+            }
+            got_any = true;
+        }
+    }
+
+    if (got_any) {
+        // Mark all 12 RC channels as "received" so the main rc loop in recv_fdm
+        // (rcin_chan_count = i+1 when bit set) picks them up.
+        last_received_bitmask |= (RC_1 | RC_2 | RC_3 | RC_4 | RC_5 | RC_6 |
+                                   RC_7 | RC_8 | RC_9 | RC_10 | RC_11 | RC_12);
+        // Write rcin[] directly so fdm.rcin reflects current state every frame
+        // (avoids depending on the JSON sensor parser path).
+        for (uint8_t i = 0; i < ARRAY_SIZE(state.rc); i++) {
+            rcin[i] = (state.rc[i] - 1000.0f) / 1000.0f;
+        }
+        rcin_chan_count = ARRAY_SIZE(state.rc);
+    }
+#endif
+}
+
 void JSON::update(const struct sitl_input &input)
 {
+    // MantaShark fork: pull binary RCIN before sending fdm output, so rcin
+    // values reflect the latest stick state each step.
+    recv_rcin();
+
     // send to JSON model
     output_servos(input);
 

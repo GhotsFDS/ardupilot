@@ -219,6 +219,27 @@ public:
         k_actuator4             = 187,
         k_actuator5             = 188,
         k_actuator6             = 189,
+        // MantaShark extension (2026-04-23): k_rcin17..k_rcin32
+        // 为 DroneCAN AP_Periph 扩展 16 路 actuator passthrough 超出原 k_rcin16 限制.
+        // 编号 200-215 留 190-199 给 upstream future (k_actuator7+).
+        // AP_Periph rc_out.cpp 的 k_rcin1 + actuator_id - 1 线性公式在 17-32 不成立,
+        // 必须用 mantashark_rcin_function(actuator_id) 辅助函数查表映射 (见 rc_out.cpp).
+        k_rcin17                = 200,
+        k_rcin18                = 201,
+        k_rcin19                = 202,
+        k_rcin20                = 203,
+        k_rcin21                = 204,
+        k_rcin22                = 205,
+        k_rcin23                = 206,
+        k_rcin24                = 207,
+        k_rcin25                = 208,
+        k_rcin26                = 209,
+        k_rcin27                = 210,
+        k_rcin28                = 211,
+        k_rcin29                = 212,
+        k_rcin30                = 213,
+        k_rcin31                = 214,
+        k_rcin32                = 215,
         k_nr_aux_servo_functions         ///< This must be the last enum value (only add new values _before_ this one)
     } Function;
 

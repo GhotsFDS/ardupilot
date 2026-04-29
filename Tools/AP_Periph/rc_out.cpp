@@ -24,12 +24,27 @@
 // Raw ESC command normalized into [-8192, 8191]
 #define UAVCAN_ESC_MAX_VALUE    8191
 
-#define SERVO_OUT_RCIN_MAX      32  // note that we allow for more than is in the enum
+#define SERVO_OUT_RCIN_MAX      32
 #ifndef SERVO_OUT_MOTOR_MAX
 #define SERVO_OUT_MOTOR_MAX     32  // SRV_Channel::k_motor1 ... SRV_Channel::k_motor8, SRV_Channel::k_motor9 ... SRV_Channel::k_motor12, SRV_Channel::k_motor13 ... SRV_Channel::k_motor32
 #endif
 
 extern const AP_HAL::HAL &hal;
+
+// MantaShark patch (2026-04-23): actuator_id → RCIN passthrough function.
+// 1..16 映射 k_rcin1..16 (enum 连续 51..66), 17..32 映射 k_rcin17..32 (enum 不连续, 200..215).
+// 原线性公式 (k_rcin1 + actuator_id - 1) 在 17+ 会跑到 k_ignition/k_starter 等别的 function,
+// 造成数据飞到错误 output 通道. 用查表避免.
+static SRV_Channel::Function mantashark_rcin_function(uint8_t actuator_id)
+{
+    if (actuator_id >= 1 && actuator_id <= 16) {
+        return SRV_Channel::Function(SRV_Channel::k_rcin1 + actuator_id - 1);
+    }
+    if (actuator_id >= 17 && actuator_id <= 32) {
+        return SRV_Channel::Function(SRV_Channel::k_rcin17 + actuator_id - 17);
+    }
+    return SRV_Channel::k_none;  // 非法 id, 调用方应检查返回值
+}
 
 void AP_Periph_FW::rcout_init()
 {
@@ -48,12 +63,13 @@ void AP_Periph_FW::rcout_init()
 
 #if HAL_PWM_COUNT > 0
     for (uint8_t i=0; i<HAL_PWM_COUNT; i++) {
-        servo_channels.set_default_function(i, SRV_Channel::Function(SRV_Channel::k_rcin1 + i));
+        // MantaShark patch: use lookup to handle rcin17-32 (non-contiguous enum)
+        servo_channels.set_default_function(i, mantashark_rcin_function(i + 1));
     }
 #endif
 
     for (uint8_t i=0; i<SERVO_OUT_RCIN_MAX; i++) {
-        SRV_Channels::set_angle(SRV_Channel::Function(SRV_Channel::k_rcin1 + i), 1000);
+        SRV_Channels::set_angle(mantashark_rcin_function(i + 1), 1000);
     }
 
     uint32_t esc_mask = 0;
@@ -67,6 +83,21 @@ void AP_Periph_FW::rcout_init()
 
     // run this once and at 1Hz to configure aux and esc ranges
     rcout_init_1Hz();
+
+    // MantaShark startup diag: dump OUT5..9 函数/PWM 状态, 验证 EEPROM 持久化
+#if HAL_PWM_COUNT >= 9
+    for (uint8_t ch_idx = 4; ch_idx < 9; ch_idx++) {
+        SRV_Channel *c = SRV_Channels::srv_channel(ch_idx);
+        if (c) {
+            can_printf("OUT%u fn=%u mn=%u mx=%u tr=%u",
+                       ch_idx + 1,
+                       (unsigned)c->get_function(),
+                       (unsigned)c->get_output_min(),
+                       (unsigned)c->get_output_max(),
+                       (unsigned)c->get_trim());
+        }
+    }
+#endif
 
 #if HAL_DSHOT_ENABLED
     hal.rcout->set_dshot_esc_type(SRV_Channels::get_dshot_esc_type());
@@ -113,7 +144,10 @@ void AP_Periph_FW::rcout_esc(int16_t *rc, uint8_t num_channels)
 void AP_Periph_FW::rcout_srv_unitless(uint8_t actuator_id, const float command_value)
 {
 #if HAL_PWM_COUNT > 0
-    const SRV_Channel::Function function = SRV_Channel::Function(SRV_Channel::k_rcin1 + actuator_id - 1);
+    const SRV_Channel::Function function = mantashark_rcin_function(actuator_id);
+    if (function == SRV_Channel::k_none) { return; }
+    // MantaShark fix: 每次 ensure angle range 已设, 防止运行时改 FUNCTION 后 set_angle 未追加
+    SRV_Channels::set_angle(function, 1000);
     SRV_Channels::set_output_norm(function, command_value);
 
     // Add to mask of channels that will be cleared if no commands are received
@@ -129,7 +163,8 @@ void AP_Periph_FW::rcout_srv_unitless(uint8_t actuator_id, const float command_v
 void AP_Periph_FW::rcout_srv_PWM(uint8_t actuator_id, const float command_value)
 {
 #if HAL_PWM_COUNT > 0
-    const SRV_Channel::Function function = SRV_Channel::Function(SRV_Channel::k_rcin1 + actuator_id - 1);
+    const SRV_Channel::Function function = mantashark_rcin_function(actuator_id);
+    if (function == SRV_Channel::k_none) { return; }
     SRV_Channels::set_output_pwm(function, uint16_t(command_value+0.5));
 
     // Add to mask of channels that will be cleared if no commands are received
@@ -231,7 +266,8 @@ void AP_Periph_FW::sim_update_actuator(uint8_t actuator_id)
         if ((sim_actuator.mask & (1U<<i)) == 0) {
             continue;
         }
-        const SRV_Channel::Function function = SRV_Channel::Function(SRV_Channel::k_rcin1 + i);
+        const SRV_Channel::Function function = mantashark_rcin_function(i + 1);
+        if (function == SRV_Channel::k_none) { continue; }
         uavcan_equipment_actuator_Status pkt {};
         pkt.actuator_id = i + 1;
         // assume 45 degree angle for simulation

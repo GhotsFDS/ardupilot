@@ -64,6 +64,11 @@ private:
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     SocketAPM_native sock;
+    // MantaShark fork: dedicated UDP RCIN listener (binary 16ch packet, port = sitl->rcin_port).
+    // Allows mavproxy --sitl 5501 + raw UDP injection to drive RC in JSON model
+    // (mavlink RC_CHANNELS_OVERRIDE alone races with channel.update() and stays at 0).
+    SocketAPM_native rcin_sock{true};
+    bool rcin_sock_bound = false;
 #else
     // sim-on-hardware
     SocketAPM sock;
@@ -74,6 +79,7 @@ private:
 
     void output_servos(const struct sitl_input &input);
     void recv_fdm(const struct sitl_input &input);
+    void recv_rcin(void);
 
     uint64_t parse_sensors(const char *json);
 

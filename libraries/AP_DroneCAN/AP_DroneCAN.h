@@ -242,6 +242,7 @@ private:
     AP_Int16 _notify_state_hz;
     AP_Int16 _pool_size;
     AP_Int32 _esc_rv;
+    AP_Int8  _esc_unarmed;  // MantaShark: 1 = bypass soft-armed gate for CAN ESC (ground preflight)
 
     uint32_t *mem_pool;
 

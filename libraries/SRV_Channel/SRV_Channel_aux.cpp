@@ -193,6 +193,11 @@ void SRV_Channel::aux_servo_function_setup(void)
     case k_rcin1_mapped ... k_rcin16_mapped:
         set_angle(4500);
         break;
+    // MantaShark patch: k_rcin1..16 (51..66) + k_rcin17..32 (200..215) RCIN passthrough
+    case k_rcin1 ... k_rcin16:
+    case k_rcin17 ... k_rcin32:
+        set_angle(1000);
+        break;
     case k_throttle:
     case k_throttleLeft:
     case k_throttleRight:

@@ -162,6 +162,13 @@ const AP_Param::GroupInfo AP_DroneCAN::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("ESC_RV", 9, AP_DroneCAN, _esc_rv, 0),
 
+    // @Param: ESC_NA
+    // @DisplayName: DroneCAN ESC no-arm bypass (MantaShark)
+    // @Description: If 1, CAN ESC RawCommand sends real scaled output even when disarmed. Use for ground preflight only. Default 0 = upstream safety behavior (send 0 when disarmed).
+    // @Values: 0:Disabled,1:Bypass arm gate
+    // @User: Advanced
+    AP_GROUPINFO("ESC_NA", 24, AP_DroneCAN, _esc_unarmed, 1),
+
 #if AP_RELAY_DRONECAN_ENABLED
     // @Param: RLY_RT
     // @DisplayName: DroneCAN relay output rate
@@ -850,7 +857,8 @@ void AP_DroneCAN::SRV_send_esc(void)
     // if at least one is active (update) we need to send to all
     if (active_esc_num > 0) {
         k = 0;
-        const bool armed = hal.util->get_soft_armed();
+        // MantaShark: _esc_unarmed=1 bypasses soft-armed gate (ground preflight)
+        const bool armed = hal.util->get_soft_armed() || (_esc_unarmed.get() != 0);
         for (uint8_t i = esc_offset; i < max_esc_num && k < 20; i++) {
             if (armed && ((((uint32_t) 1U) << i) & _ESC_armed_mask)) {
                 esc_msg.cmd.data[k] = scale_esc_output(i);
@@ -869,6 +877,21 @@ void AP_DroneCAN::SRV_send_esc(void)
         }
         // immediately push data to CAN bus
         canard_iface.processTx(true);
+
+        // MantaShark DEBUG: 1Hz log ESC send stats
+        static uint32_t _ms_dbg_last = 0;
+        uint32_t _ms_now = AP_HAL::millis();
+        if (_ms_now - _ms_dbg_last > 2000) {
+            _ms_dbg_last = _ms_now;
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "D%u bm=%x mask=%x k=%u d[12]=%d d[13]=%d ofs=%u",
+                (unsigned)_driver_index,
+                (unsigned)_esc_bm.get(),
+                (unsigned)_ESC_armed_mask,
+                (unsigned)k,
+                (int)(k>12?esc_msg.cmd.data[12]:-999),
+                (int)(k>13?esc_msg.cmd.data[13]:-999),
+                (unsigned)esc_offset);
+        }
     }
 
     for (uint8_t i = 0; i < DRONECAN_SRV_NUMBER; i++) {
@@ -903,7 +926,8 @@ void AP_DroneCAN::SRV_send_esc_hobbywing(void)
     // if at least one is active (update) we need to send to all
     if (active_esc_num > 0) {
         k = 0;
-        const bool armed = hal.util->get_soft_armed();
+        // MantaShark: _esc_unarmed=1 bypasses soft-armed gate (ground preflight)
+        const bool armed = hal.util->get_soft_armed() || (_esc_unarmed.get() != 0);
         for (uint8_t i = esc_offset; i < max_esc_num && k < 20; i++) {
             if (armed && ((((uint32_t) 1U) << i) & _ESC_armed_mask)) {
                 esc_msg.command.data[k] = scale_esc_output(i);
@@ -1270,9 +1294,11 @@ void AP_DroneCAN::safety_state_send()
     }
 
     { // handle ArmingStatus
+        // MantaShark: _esc_unarmed=1 → also broadcast FULLY_ARMED so L431's DShot bypasses its own arm gate
+        const bool effective_armed = hal.util->get_soft_armed() || (_esc_unarmed.get() != 0);
         uavcan_equipment_safety_ArmingStatus arming_msg;
-        arming_msg.status = hal.util->get_soft_armed() ? UAVCAN_EQUIPMENT_SAFETY_ARMINGSTATUS_STATUS_FULLY_ARMED :
-                                                      UAVCAN_EQUIPMENT_SAFETY_ARMINGSTATUS_STATUS_DISARMED;
+        arming_msg.status = effective_armed ? UAVCAN_EQUIPMENT_SAFETY_ARMINGSTATUS_STATUS_FULLY_ARMED :
+                                              UAVCAN_EQUIPMENT_SAFETY_ARMINGSTATUS_STATUS_DISARMED;
         arming_status.broadcast(arming_msg);
     }
 }
