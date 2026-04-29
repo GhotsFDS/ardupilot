@@ -330,12 +330,15 @@ void SRV_Channels::set_digital_outputs(uint32_t dig_mask, uint32_t rev_mask) {
     for (uint8_t i = 0; i < NUM_SERVO_CHANNELS; i++) {
         SRV_Channel &c = channels[i];
         if (digital_mask & (1U<<i)) {
-            c.servo_min.set_and_default(1000);
-            c.servo_max.set_and_default(2000);
+            // mantashark-rcin-extend: 不强制覆盖 SERVOx_MIN/MAX, 让用户设的 500-2500 生效
+            // (DroneCAN ESC frame 协议虽然 [-1,+1] 编码, 但 ArduPilot 默认 mapping 1000-2000
+            //  改 set_default 只设 default, 用户已设 500/2500 保留, channel mapping 按 SERVOx_MIN/MAX 算)
+            c.servo_min.set_default(1000);
+            c.servo_max.set_default(2000);
             if (reversible_mask & (1U<<i)) {
-                c.servo_trim.set_and_default(1500);
+                c.servo_trim.set_default(1500);
             } else {
-                c.servo_trim.set_and_default(1000);
+                c.servo_trim.set_default(1000);
             }
         }
     }
