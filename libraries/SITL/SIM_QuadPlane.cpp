@@ -82,6 +82,12 @@ QuadPlane::QuadPlane(const char *frame_str) :
         copter_tailsitter = true;
         ground_behavior = GROUND_BEHAVIOR_TAILSITTER;
         thrust_scale *= 1.5;
+    } else if (strstr(frame_str, "-mantashark")) {
+        // MantaShark v9 P4: 12 EDF on SERVO 1-12, no plane control surfaces.
+        // Use 4-motor X frame from SERVO 1-4 (KS group) for SITL physics integration.
+        // Real vehicle has 12 motors via DShot+CAN, SITL only validates thrust→motion.
+        frame_type = "x";
+        motor_offset = 0;  // motors at SERVO 1-4 (not 5-8)
     }
     frame = Frame::create_frame(frame_type);
     if (frame == nullptr) {
