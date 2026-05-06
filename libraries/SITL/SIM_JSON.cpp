@@ -486,7 +486,14 @@ void JSON::recv_fdm(const struct sitl_input &input)
             rc_chan_count = i+1;
         }
     }
-    rcin_chan_count = rc_chan_count;
+    // MantaShark fork race fix: 若 JSON FDM 没发 RC field (gz plugin 不发),
+    // 不要覆盖 rcin_chan_count, 保留 recv_rcin (UDP path) 写的值.
+    // 原代码 `rcin_chan_count = rc_chan_count` 会把 UDP 写的 16 覆盖回 0,
+    // 让 AP_RCProtocol_FDM.update() 看 rcin_chan_count==0 直接 return,
+    // ATC 永远拿不到 ch3 throttle (lua 注释 line 297-299 描述的 race).
+    if (rc_chan_count > 0) {
+        rcin_chan_count = rc_chan_count;
+    }
 
     // update battery state
     if ((received_bitmask & BAT_VOLT) != 0) {
