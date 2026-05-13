@@ -343,6 +343,13 @@ singleton AP_ONVIF method get_pan_tilt_limit_max Vector2f
 
 ap_object AP_Vehicle::custom_mode_state depends (!defined(HAL_BUILD_AP_PERIPH))
 ap_object AP_Vehicle::custom_mode_state field allow_entry boolean read write
+ap_object AP_Vehicle::custom_mode_state field pre_arm_ok boolean read write
+ap_object AP_Vehicle::custom_mode_state field phase_id uint8_t'skip_check read write
+ap_object AP_Vehicle::custom_mode_state field failsafe_target_mode uint8_t'skip_check read write
+ap_object AP_Vehicle::custom_mode_state field preflight_done boolean read write
+ap_object AP_Vehicle::custom_mode_state field last_heartbeat_ms uint32_t'skip_check read write
+ap_object AP_Vehicle::custom_mode_state method set_pre_arm_msg void string
+ap_object AP_Vehicle::custom_mode_state method set_phase_name void string
 
 include AP_Vehicle/AP_Vehicle.h
 singleton AP_Vehicle depends AP_SCRIPTING_BINDING_VEHICLE_ENABLED

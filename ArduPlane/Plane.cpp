@@ -1081,7 +1081,109 @@ Plane::Plane(void)
 {
     // C++11 doesn't allow in-class initialisation of bitfields
     auto_state.takeoff_complete = true;
+
+#if AP_SCRIPTING_ENABLED
+    // Initialise custom-mode slot arrays to nullptr
+    for (uint8_t i = 0; i < ARRAY_SIZE(mode_guided_custom); i++) {
+        mode_guided_custom[i] = nullptr;
+    }
+#if HAL_QUADPLANE_ENABLED
+    for (uint8_t i = 0; i < ARRAY_SIZE(mode_qstabilize_custom); i++) {
+        mode_qstabilize_custom[i] = nullptr;
+    }
+#endif
+#endif
 }
+
+#if AP_SCRIPTING_ENABLED
+// Register a custom mode with given number and names.
+//
+// Mode-number ranges:
+//   * 27, 28, 29  → ModeQStabilizeCustom (MantaShark WIG fork-local, Quadplane only)
+//   * any other   → ModeGuidedCustom (mirrors Copter pattern, upstream-targetable)
+AP_Vehicle::custom_mode_state* Plane::register_custom_mode(const uint8_t num, const char* full_name, const char* short_name)
+{
+    const Mode::Number number = (Mode::Number)num;
+
+#if HAL_QUADPLANE_ENABLED
+    const bool is_qstab_range = (num == 27 || num == 28 || num == 29);
+    if (is_qstab_range && quadplane.enabled()) {
+        // See if this mode has already been registered (scripting restarts)
+        for (uint8_t i = 0; i < ARRAY_SIZE(mode_qstabilize_custom); i++) {
+            if (mode_qstabilize_custom[i] == nullptr) {
+                break;
+            }
+            if ((mode_qstabilize_custom[i]->mode_number() == number) &&
+                (strcmp(mode_qstabilize_custom[i]->name(), full_name) == 0) &&
+                (strncmp(mode_qstabilize_custom[i]->name4(), short_name, 4) == 0)) {
+                return &mode_qstabilize_custom[i]->state;
+            }
+        }
+
+        // Number already registered to existing mode
+        if (mode_from_mode_num(number) != nullptr) {
+            return nullptr;
+        }
+
+        // Find free slot
+        for (uint8_t i = 0; i < ARRAY_SIZE(mode_qstabilize_custom); i++) {
+            if (mode_qstabilize_custom[i] == nullptr) {
+                const char* full_name_copy = strdup(full_name);
+                const char* short_name_copy = strndup(short_name, 4);
+                if ((full_name_copy != nullptr) && (short_name_copy != nullptr)) {
+                    mode_qstabilize_custom[i] = NEW_NOTHROW ModeQStabilizeCustom(number, full_name_copy, short_name_copy);
+                }
+                if (mode_qstabilize_custom[i] == nullptr) {
+                    free((void*)full_name_copy);
+                    free((void*)short_name_copy);
+                    return nullptr;
+                }
+                gcs().available_modes_changed();
+                return &mode_qstabilize_custom[i]->state;
+            }
+        }
+
+        // No free slots
+        return nullptr;
+    }
+#endif // HAL_QUADPLANE_ENABLED
+
+    // Default path: Guided-based custom mode (mirrors ArduCopter)
+    for (uint8_t i = 0; i < ARRAY_SIZE(mode_guided_custom); i++) {
+        if (mode_guided_custom[i] == nullptr) {
+            break;
+        }
+        if ((mode_guided_custom[i]->mode_number() == number) &&
+            (strcmp(mode_guided_custom[i]->name(), full_name) == 0) &&
+            (strncmp(mode_guided_custom[i]->name4(), short_name, 4) == 0)) {
+            return &mode_guided_custom[i]->state;
+        }
+    }
+
+    if (mode_from_mode_num(number) != nullptr) {
+        return nullptr;
+    }
+
+    for (uint8_t i = 0; i < ARRAY_SIZE(mode_guided_custom); i++) {
+        if (mode_guided_custom[i] == nullptr) {
+            const char* full_name_copy = strdup(full_name);
+            const char* short_name_copy = strndup(short_name, 4);
+            if ((full_name_copy != nullptr) && (short_name_copy != nullptr)) {
+                mode_guided_custom[i] = NEW_NOTHROW ModeGuidedCustom(number, full_name_copy, short_name_copy);
+            }
+            if (mode_guided_custom[i] == nullptr) {
+                free((void*)full_name_copy);
+                free((void*)short_name_copy);
+                return nullptr;
+            }
+            gcs().available_modes_changed();
+            return &mode_guided_custom[i]->state;
+        }
+    }
+
+    return nullptr;
+}
+#endif // AP_SCRIPTING_ENABLED
 
 Plane plane;
 AP_Vehicle& vehicle = plane;

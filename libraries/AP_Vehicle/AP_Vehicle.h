@@ -256,7 +256,19 @@ public:
 
     // Register a custom mode with given number and names, return a structure which the script can edit
     struct custom_mode_state {
-        bool allow_entry;
+        bool allow_entry{false};
+        // WIG extensions (MantaShark fork-local):
+        bool pre_arm_ok{false};
+        char pre_arm_msg[48]{};
+        uint8_t phase_id{0};
+        char phase_name[12]{};
+        uint8_t failsafe_target_mode{0};
+        bool preflight_done{false};
+        uint32_t last_heartbeat_ms{0};
+
+        // helper setters for scripting bindings (strings)
+        void set_pre_arm_msg(const char *msg);
+        void set_phase_name(const char *name);
     };
     virtual custom_mode_state* register_custom_mode(const uint8_t number, const char* full_name, const char* short_name) { return nullptr; }
 

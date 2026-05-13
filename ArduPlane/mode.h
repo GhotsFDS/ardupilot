@@ -6,6 +6,7 @@
 #include <AP_Soaring/AP_Soaring.h>
 #include <AP_ADSB/AP_ADSB.h>
 #include <AP_Vehicle/ModeReason.h>
+#include <AP_Vehicle/AP_Vehicle.h>
 #include "quadplane.h"
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Mission/AP_Mission.h>
@@ -401,6 +402,31 @@ private:
     float active_radius_m;
 };
 
+#if AP_SCRIPTING_ENABLED
+// Mode which behaves as guided with custom mode number and name
+class ModeGuidedCustom : public ModeGuided {
+public:
+    // constructor registers custom number and names
+    ModeGuidedCustom(const Number _number, const char* _full_name, const char* _short_name);
+
+    Number mode_number() const override { return number; }
+
+    const char *name() const override { return full_name; }
+    const char *name4() const override { return short_name; }
+
+    // State object which can be edited by scripting
+    AP_Vehicle::custom_mode_state state;
+
+protected:
+    bool _enter() override;
+
+private:
+    const Number number;
+    const char* full_name;
+    const char* short_name;
+};
+#endif
+
 class ModeCircle: public Mode
 {
 public:
@@ -757,6 +783,37 @@ private:
     void set_limited_roll_pitch(const float roll_input, const float pitch_input);
 
 };
+
+#if AP_SCRIPTING_ENABLED
+// Mode which behaves as QStabilize with custom mode number, name and
+// scripting-controlled entry / pre-arm / heartbeat watchdog.
+// MantaShark fork-local extension on top of upstream ModeGuidedCustom pattern.
+class ModeQStabilizeCustom : public ModeQStabilize {
+public:
+    // constructor registers custom number and names
+    ModeQStabilizeCustom(const Number _number, const char* _full_name, const char* _short_name);
+
+    Number mode_number() const override { return number; }
+
+    const char *name() const override { return full_name; }
+    const char *name4() const override { return short_name; }
+
+    // override update() to add heartbeat watchdog before delegating to ModeQStabilize
+    void update() override;
+
+    // State object which can be edited by scripting
+    AP_Vehicle::custom_mode_state state;
+
+protected:
+    bool _enter() override;
+    bool _pre_arm_checks(size_t buflen, char *buffer) const override;
+
+private:
+    const Number number;
+    const char* full_name;
+    const char* short_name;
+};
+#endif
 
 class ModeQHover : public Mode
 {

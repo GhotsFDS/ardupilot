@@ -174,6 +174,10 @@ public:
     friend class ModeTakeoff;
     friend class ModeThermal;
     friend class ModeLoiterAltQLand;
+#if AP_SCRIPTING_ENABLED
+    friend class ModeGuidedCustom;
+    friend class ModeQStabilizeCustom;
+#endif
 #if MODE_AUTOLAND_ENABLED
     friend class ModeAutoLand;
 #endif
@@ -314,10 +318,18 @@ private:
     ModeAvoidADSB mode_avoidADSB;
 #endif
     ModeGuided mode_guided;
+#if AP_SCRIPTING_ENABLED
+    // Custom modes registered at runtime (Guided-based, mirrors Copter pattern)
+    ModeGuidedCustom *mode_guided_custom[5];
+#endif
     ModeInitializing mode_initializing;
     ModeManual mode_manual;
 #if HAL_QUADPLANE_ENABLED
     ModeQStabilize mode_qstabilize;
+#if AP_SCRIPTING_ENABLED
+    // Custom modes registered at runtime (QStabilize-based, MantaShark WIG fork-local)
+    ModeQStabilizeCustom *mode_qstabilize_custom[3];
+#endif
     ModeQHover mode_qhover;
     ModeQLoiter mode_qloiter;
     ModeQLand mode_qland;
@@ -1324,6 +1336,9 @@ public:
     // allow scripts to override mission/guided crosstrack behaviour
     // It's up to the Lua script to ensure the provided location makes sense
     bool set_crosstrack_start(const Location &new_start_location) override;
+
+    // Register a custom mode with given number and names
+    AP_Vehicle::custom_mode_state* register_custom_mode(const uint8_t number, const char* full_name, const char* short_name) override;
 
 #endif // AP_SCRIPTING_ENABLED
 

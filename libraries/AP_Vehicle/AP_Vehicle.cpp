@@ -1235,6 +1235,29 @@ void AP_Vehicle::fence_init()
 }
 #endif  // AP_FENCE_ENABLED
 
+#if AP_SCRIPTING_ENABLED
+// helper setters for custom_mode_state string fields (used by Lua bindings)
+void AP_Vehicle::custom_mode_state::set_pre_arm_msg(const char *msg)
+{
+    if (msg == nullptr) {
+        pre_arm_msg[0] = '\0';
+        return;
+    }
+    strncpy(pre_arm_msg, msg, sizeof(pre_arm_msg) - 1);
+    pre_arm_msg[sizeof(pre_arm_msg) - 1] = '\0';
+}
+
+void AP_Vehicle::custom_mode_state::set_phase_name(const char *name)
+{
+    if (name == nullptr) {
+        phase_name[0] = '\0';
+        return;
+    }
+    strncpy(phase_name, name, sizeof(phase_name) - 1);
+    phase_name[sizeof(phase_name) - 1] = '\0';
+}
+#endif // AP_SCRIPTING_ENABLED
+
 AP_Vehicle *AP_Vehicle::_singleton = nullptr;
 
 AP_Vehicle *AP_Vehicle::get_singleton()

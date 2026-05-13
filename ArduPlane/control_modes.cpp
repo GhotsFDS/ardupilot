@@ -100,6 +100,25 @@ Mode *Plane::mode_from_mode_num(const enum Mode::Number num)
 #endif  // HAL_QUADPLANE_ENABLED
 
     }
+
+#if AP_SCRIPTING_ENABLED
+    if (ret == nullptr) {
+        // Look up scripting-registered custom modes
+        for (uint8_t i = 0; i < ARRAY_SIZE(mode_guided_custom); i++) {
+            if (mode_guided_custom[i] != nullptr && mode_guided_custom[i]->mode_number() == num) {
+                return mode_guided_custom[i];
+            }
+        }
+#if HAL_QUADPLANE_ENABLED
+        for (uint8_t i = 0; i < ARRAY_SIZE(mode_qstabilize_custom); i++) {
+            if (mode_qstabilize_custom[i] != nullptr && mode_qstabilize_custom[i]->mode_number() == num) {
+                return mode_qstabilize_custom[i];
+            }
+        }
+#endif
+    }
+#endif // AP_SCRIPTING_ENABLED
+
     return ret;
 }
 
