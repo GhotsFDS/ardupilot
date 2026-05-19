@@ -265,6 +265,12 @@ public:
         uint8_t failsafe_target_mode{0};
         bool preflight_done{false};
         uint32_t last_heartbeat_ms{0};
+        // Scripting-controlled yaw heading lock (跟 quadplane mission AUTO 同 angle path):
+        // 当 yaw_target_active=true, ModeQStabilizeCustom::run() 走
+        // attitude_control->input_euler_angle_roll_pitch_yaw_cd() 给 yaw ANGLE target,
+        // ATC 自己跑 angle->rate->motor; false 时走父类 ModeQStabilize::run() (rate path).
+        bool yaw_target_active{false};
+        int32_t yaw_target_cd{0};
 
         // helper setters for scripting bindings (strings)
         void set_pre_arm_msg(const char *msg);

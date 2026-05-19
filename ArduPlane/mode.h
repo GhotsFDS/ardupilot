@@ -801,6 +801,10 @@ public:
     // override update() to add heartbeat watchdog before delegating to ModeQStabilize
     void update() override;
 
+    // override run() — when state.yaw_target_active=true, send yaw ANGLE target to
+    // attitude controller (跟 quadplane mission AUTO 同 angle path); 否则委托父类 rate path.
+    void run() override;
+
     // State object which can be edited by scripting
     AP_Vehicle::custom_mode_state state;
 

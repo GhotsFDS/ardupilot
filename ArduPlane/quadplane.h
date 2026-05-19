@@ -59,6 +59,7 @@ public:
     friend class ModeQLoiter;
     friend class ModeQRTL;
     friend class ModeQStabilize;
+    friend class ModeQStabilizeCustom;
     friend class ModeQAutotune;
     friend class ModeQAcro;
     friend class ModeLoiterAltQLand;

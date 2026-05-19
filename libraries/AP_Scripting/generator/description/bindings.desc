@@ -348,6 +348,8 @@ ap_object AP_Vehicle::custom_mode_state field phase_id uint8_t'skip_check read w
 ap_object AP_Vehicle::custom_mode_state field failsafe_target_mode uint8_t'skip_check read write
 ap_object AP_Vehicle::custom_mode_state field preflight_done boolean read write
 ap_object AP_Vehicle::custom_mode_state field last_heartbeat_ms uint32_t'skip_check read write
+ap_object AP_Vehicle::custom_mode_state field yaw_target_active boolean read write
+ap_object AP_Vehicle::custom_mode_state field yaw_target_cd int32_t'skip_check read write
 ap_object AP_Vehicle::custom_mode_state method set_pre_arm_msg void string
 ap_object AP_Vehicle::custom_mode_state method set_phase_name void string
 
