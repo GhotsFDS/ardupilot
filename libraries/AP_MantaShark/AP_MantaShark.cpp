@@ -1,12 +1,10 @@
 /*
- * P8.5b.3 — AP_MantaShark control allocator (real algorithm)
+ * P8.5b.4 — AP_MantaShark control allocator (16 MSAK_ params wired)
  *
- * Ported verbatim from MantaShark/tools/allocator_cpp/AP_MantaShark_Allocator.cpp.
- * Parity verified: 1000 random cases vs Python prototype, max ΔK diff 1.6e-6.
+ * Defaults match b.3 hardcoded values, so SITL smoke test must reproduce
+ * b.3 output bit-equivalent until user changes any MSAK_ param.
  *
- * Solver: priority WLS + active-set clipping
- *   minimize  || W (A * dK - b) ||^2 + damping * || dK ||^2
- *   subject to  -base_k <= dK <= 1 - base_k
+ * 16 params per P8.5 design v3 §3 (MSAK_CTRL_EN NOT registered, P8.7+).
  */
 
 #include "AP_MantaShark.h"
@@ -17,36 +15,30 @@
 
 AP_MantaShark *AP_MantaShark::_singleton = nullptr;
 
-// ───── actuator model constants (calibration scalars, P8.4 v1 placeholders) ─────
-// Position from MantaShark scripts/modules/actuators.lua (CAD → ArduPilot frame).
-// thrust_gain 当前是 placeholder, P8.4 v2 + bench calibration 后填真值.
 namespace {
-struct ActuatorModel {
-    int tilt_key_idx;    // index into State.tilts[]
-    float x_m;           // forward + (ArduPilot frame)
-    float y_m;           // right + (ArduPilot frame)
-    float thrust_gain;   // calibration scalar
-    float yaw_gain;      // 0 / 1
-};
-
-// Mirror tools/allocator_cpp default_models, indexed by Col enum
-constexpr ActuatorModel ACTUATOR_MODELS[AP_MantaShark::N_AX] = {
-    // tilt_key,                          x_m,    y_m,     thrust_gain, yaw_gain
-    {AP_MantaShark::TILT_SGRP,            0.79f,  0.0f,    4.0f,        0.0f},  // KS
-    {AP_MantaShark::TILT_DF,              0.80f,  0.0f,    2.0f,        0.0f},  // KDF
-    {AP_MantaShark::TILT_TL,              0.05f, -0.38f,   2.0f,        1.0f},  // KT_L
-    {AP_MantaShark::TILT_TR,              0.05f, +0.38f,   2.0f,        1.0f},  // KT_R
-    {AP_MantaShark::TILT_RD,             -0.50f,  0.0f,    2.0f,        0.0f},  // KRD
-};
-
-// WLS row weights (priority — protect Fz/My over Fx, per gpt5 P8.0 design)
-constexpr float W_FX = 1.0f, W_FZ = 8.0f, W_MY = 12.0f, W_MZ = 2.0f;
-constexpr float DAMPING = 1.0e-4f;
-constexpr int MAX_ITER = 8;
 constexpr float DEG2RAD_F = 0.017453292519943295f;
+
+// Static tilt-key-index lookup (which tilts[] entry each column reads)
+// Per P8.4 §1.5 canonical mapping.
+constexpr int TILT_KEY[AP_MantaShark::N_AX] = {
+    AP_MantaShark::TILT_SGRP,   // KS
+    AP_MantaShark::TILT_DF,     // KDF
+    AP_MantaShark::TILT_TL,     // KT_L
+    AP_MantaShark::TILT_TR,     // KT_R
+    AP_MantaShark::TILT_RD,     // KRD
+};
+
+// Yaw arm sign: only KT_L/KT_R contribute to Mz (yaw_gain = 1.0), others 0
+constexpr float YAW_ARM[AP_MantaShark::N_AX] = {
+    0.0f,   // KS
+    0.0f,   // KDF
+    1.0f,   // KT_L
+    1.0f,   // KT_R
+    0.0f,   // KRD
+};
 } // anon
 
-// ───── AP_Param table (P8.5b.3: 2 params placeholder, P8.5b.4 加完整 16) ─────
+// ───── AP_Param table (16 entries, per P8.5 design v3 §3) ─────
 const AP_Param::GroupInfo AP_MantaShark::var_info[] = {
     // @Param: KS_GAIN
     // @DisplayName: KS group thrust gain (calibration scalar)
@@ -62,6 +54,96 @@ const AP_Param::GroupInfo AP_MantaShark::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("LOG_EN", 1, AP_MantaShark, _log_en, 1),
 
+    // @Param: KDF_GAIN
+    // @DisplayName: KDF group thrust gain
+    // @Range: 0 20
+    // @User: Advanced
+    AP_GROUPINFO("KDF_GAIN", 2, AP_MantaShark, _kdf_gain, 2.0f),
+
+    // @Param: KT_GAIN
+    // @DisplayName: KT_L/KT_R aggregate thrust gain (共用)
+    // @Range: 0 20
+    // @User: Advanced
+    AP_GROUPINFO("KT_GAIN", 3, AP_MantaShark, _kt_gain, 2.0f),
+
+    // @Param: KRD_GAIN
+    // @DisplayName: KRD group thrust gain
+    // @Range: 0 20
+    // @User: Advanced
+    AP_GROUPINFO("KRD_GAIN", 4, AP_MantaShark, _krd_gain, 2.0f),
+
+    // @Param: KS_X
+    // @DisplayName: KS x_m position (forward+, ArduPilot frame)
+    // @Range: -2 2
+    // @User: Advanced
+    AP_GROUPINFO("KS_X", 5, AP_MantaShark, _ks_x, 0.79f),
+
+    // @Param: KDF_X
+    // @DisplayName: KDF x_m position
+    // @Range: -2 2
+    // @User: Advanced
+    AP_GROUPINFO("KDF_X", 6, AP_MantaShark, _kdf_x, 0.80f),
+
+    // @Param: KT_X
+    // @DisplayName: KT_L/KT_R x_m position (共用)
+    // @Range: -2 2
+    // @User: Advanced
+    AP_GROUPINFO("KT_X", 7, AP_MantaShark, _kt_x, 0.05f),
+
+    // @Param: KRD_X
+    // @DisplayName: KRD x_m position
+    // @Range: -2 2
+    // @User: Advanced
+    AP_GROUPINFO("KRD_X", 8, AP_MantaShark, _krd_x, -0.50f),
+
+    // @Param: KT_Y
+    // @DisplayName: KT |y_m| (对称, KT_L y=-this KT_R y=+this)
+    // @Range: 0 2
+    // @User: Advanced
+    AP_GROUPINFO("KT_Y", 9, AP_MantaShark, _kt_y, 0.38f),
+
+    // @Param: W_FX
+    // @DisplayName: WLS row weight Fx
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("W_FX", 10, AP_MantaShark, _w_fx, 1.0f),
+
+    // @Param: W_FZ
+    // @DisplayName: WLS row weight Fz (protect lift)
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("W_FZ", 11, AP_MantaShark, _w_fz, 8.0f),
+
+    // @Param: W_MY
+    // @DisplayName: WLS row weight My (protect pitch)
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("W_MY", 12, AP_MantaShark, _w_my, 12.0f),
+
+    // @Param: W_MZ
+    // @DisplayName: WLS row weight Mz (yaw)
+    // @Range: 0 100
+    // @User: Advanced
+    AP_GROUPINFO("W_MZ", 13, AP_MantaShark, _w_mz, 2.0f),
+
+    // @Param: DAMP
+    // @DisplayName: L2 damping (Tikhonov regularizer)
+    // @Range: 0 1
+    // @User: Advanced
+    AP_GROUPINFO("DAMP", 14, AP_MantaShark, _damping, 1.0e-4f),
+
+    // @Param: MAX_ITER
+    // @DisplayName: Active-set max iterations
+    // @Range: 1 32
+    // @User: Advanced
+    AP_GROUPINFO("MAX_ITER", 15, AP_MantaShark, _max_iter, 8),
+
+    // @Param: LOG_RATE
+    // @DisplayName: BIN log Hz (lua hot-path uses for decimation)
+    // @Range: 1 100
+    // @User: Standard
+    AP_GROUPINFO("LOG_RATE", 16, AP_MantaShark, _log_rate, 50),
+
     AP_GROUPEND
 };
 
@@ -73,23 +155,60 @@ AP_MantaShark::AP_MantaShark() {
     AP_Param::setup_object_defaults(this, var_info);
 }
 
-// ───── build_matrix (analytical, body-frame) ─────
+// ───── calibration accessors ─────
+float AP_MantaShark::get_gain(int col) const {
+    switch (col) {
+        case COL_KS:   return _ks_gain.get();
+        case COL_KDF:  return _kdf_gain.get();
+        case COL_KT_L: return _kt_gain.get();
+        case COL_KT_R: return _kt_gain.get();   // KT_L/KT_R 共用
+        case COL_KRD:  return _krd_gain.get();
+    }
+    return 0.0f;
+}
+float AP_MantaShark::get_x(int col) const {
+    switch (col) {
+        case COL_KS:   return _ks_x.get();
+        case COL_KDF:  return _kdf_x.get();
+        case COL_KT_L: return _kt_x.get();
+        case COL_KT_R: return _kt_x.get();
+        case COL_KRD:  return _krd_x.get();
+    }
+    return 0.0f;
+}
+float AP_MantaShark::get_weight(int row) const {
+    switch (row) {
+        case ROW_FX: return _w_fx.get();
+        case ROW_FZ: return _w_fz.get();
+        case ROW_MY: return _w_my.get();
+        case ROW_MZ: return _w_mz.get();
+    }
+    return 1.0f;
+}
+
+// ───── build_matrix (analytical, body-frame, params runtime) ─────
 // Per actuator i:
 //   Fx_i = g_i × sin(θ_i)
-//   Fz_i = -g_i × cos(θ_i)   (Fz<0 = lift, ArduPilot convention)
+//   Fz_i = -g_i × cos(θ_i)
 //   My_i = -x_i × Fz_i
 //   Mz_i = -y_i × Fx_i × yaw_gain_i
-// theta_eff = tilts[i] (body frame, NOT + pitch_rad — gpt5 P8.4 review decision).
 void AP_MantaShark::build_matrix(float A_out[N_ROWS * N_COLS], const State &s) const {
     for (int col = 0; col < N_COLS; ++col) {
-        const auto &m = ACTUATOR_MODELS[col];
-        float theta_rad = s.tilts[m.tilt_key_idx] * DEG2RAD_F;
+        float gain = get_gain(col);
+        float x_m  = get_x(col);
+        // y_m: KT_L = -kt_y, KT_R = +kt_y, 其他 0
+        float y_m  = 0.0f;
+        if (col == COL_KT_L) y_m = -_kt_y.get();
+        else if (col == COL_KT_R) y_m = +_kt_y.get();
+        float yaw_g = YAW_ARM[col];
+
+        float theta_rad = s.tilts[TILT_KEY[col]] * DEG2RAD_F;
         float st = sinf(theta_rad);
         float ct = cosf(theta_rad);
-        float fx = m.thrust_gain * st;
-        float fz = -m.thrust_gain * ct;
-        float my = -m.x_m * fz;
-        float mz = -m.y_m * fx * m.yaw_gain;
+        float fx = gain * st;
+        float fz = -gain * ct;
+        float my = -x_m * fz;
+        float mz = -y_m * fx * yaw_g;
         A_out[ROW_FX * N_COLS + col] = fx;
         A_out[ROW_FZ * N_COLS + col] = fz;
         A_out[ROW_MY * N_COLS + col] = my;
@@ -117,7 +236,7 @@ static bool gauss_solve(double *M, double *b, int n) {
         for (int r = 0; r < n; ++r) {
             if (r == i) continue;
             double f = M[r * n + i];
-            if (fabs(f) < 1.0e-300) continue;   // skip near-zero pivots (was f == 0.0, -Werror=float-equal)
+            if (fabs(f) < 1.0e-300) continue;
             for (int c = i; c < n; ++c) M[r * n + c] -= f * M[i * n + c];
             b[r] -= f * b[i];
         }
@@ -161,9 +280,9 @@ static bool solve_wls(
     return true;
 }
 
-// ───── solve (priority WLS + active-set clipping) ─────
+// ───── solve (priority WLS + active-set, params now runtime-read) ─────
 void AP_MantaShark::solve(const State &s_in, const Demand &d, Output &out) {
-    // base_k sanitize (gpt5 P8.2 v2 review #4): clamp at solver entry
+    // base_k sanitize
     State s = s_in;
     uint8_t status = STATUS_OK;
     for (int c = 0; c < N_AX; ++c) {
@@ -176,8 +295,16 @@ void AP_MantaShark::solve(const State &s_in, const Demand &d, Output &out) {
     double A[N_ROWS * N_COLS];
     for (int i = 0; i < N_ROWS * N_COLS; ++i) A[i] = A_f[i];
 
-    const double weights[N_ROWS] = {W_FX, W_FZ, W_MY, W_MZ};
+    // Weights from params (defaults match b.3: 1/8/12/2)
+    const double weights[N_ROWS] = {
+        (double)_w_fx.get(),
+        (double)_w_fz.get(),
+        (double)_w_my.get(),
+        (double)_w_mz.get(),
+    };
     const double demand[N_ROWS] = {d.fx, d.fz, d.my, d.mz};
+    const double damping = (double)_damping.get();
+    const int max_iter = std::max(1, (int)_max_iter.get());
 
     double dk[N_AX] = {0, 0, 0, 0, 0};
     double lo[N_AX], hi[N_AX];
@@ -192,7 +319,7 @@ void AP_MantaShark::solve(const State &s_in, const Demand &d, Output &out) {
     out.sat_hi = 0;
     bool converged = false;
 
-    for (int iter = 0; iter < MAX_ITER; ++iter) {
+    for (int iter = 0; iter < max_iter; ++iter) {
         int num_free = 0;
         for (int c = 0; c < N_AX; ++c) {
             if (!fixed[c]) free_cols[num_free++] = c;
@@ -207,7 +334,7 @@ void AP_MantaShark::solve(const State &s_in, const Demand &d, Output &out) {
         }
 
         double dk_free[N_AX];
-        if (!solve_wls(A, weights, b, free_cols, num_free, DAMPING, dk_free)) {
+        if (!solve_wls(A, weights, b, free_cols, num_free, damping, dk_free)) {
             status |= STATUS_SINGULAR;
             break;
         }
