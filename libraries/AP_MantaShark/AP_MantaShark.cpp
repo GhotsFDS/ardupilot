@@ -242,7 +242,7 @@ static bool gauss_solve(double *M, double *b, int n) {
         for (int r = 0; r < n; ++r) {
             if (r == i) continue;
             double f = M[r * n + i];
-            if (fabs(f) < 1.0e-300) continue;
+            if (fabs(f) < 1.0e-30) continue;   // skip near-zero pivots (ARM toolchain truncates < 1e-37, was 1e-300)
             for (int c = i; c < n; ++c) M[r * n + c] -= f * M[i * n + c];
             b[r] -= f * b[i];
         }
