@@ -987,6 +987,11 @@ const AP_Param::Info Plane::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
+    // P8.5b.2: MantaShark control allocator (skeleton, log-only)
+    // @Group: MSAK_
+    // @Path: ../libraries/AP_MantaShark/AP_MantaShark.cpp
+    GOBJECT(mantashark,     "MSAK_", AP_MantaShark),
+
     AP_VAREND
 };
 

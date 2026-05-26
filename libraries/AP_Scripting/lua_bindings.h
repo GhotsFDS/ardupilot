@@ -38,3 +38,4 @@ int lua_GCS_command_int(lua_State *L);
 int lua_DroneCAN_get_FlexDebug(lua_State *L);
 int lua_gps_inject_data(lua_State *L);
 int lua_AP_Vehicle_set_target_velocity_NED(lua_State *L);
+int lua_mantashark_alloc_solve(lua_State *L);   // P8.5b.2: MantaShark allocator (skeleton)

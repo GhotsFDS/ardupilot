@@ -27,6 +27,7 @@ def build(bld):
             'AC_PrecLand',
             'AP_IRLock',
             'AP_Quicktune',
+            'AP_MantaShark',   # P8.5b.2: control allocator (skeleton, log-only)
         ],
     )
 

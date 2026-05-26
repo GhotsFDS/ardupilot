@@ -370,6 +370,7 @@ public:
         k_param_quicktune,
         k_param_mode_autoland,
         k_param__gcs,
+        k_param_mantashark = 274,   // P8.5b.2: AP_MantaShark singleton (MSAK_ table, fork-local)
 
     };
 

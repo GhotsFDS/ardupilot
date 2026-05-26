@@ -83,6 +83,7 @@
 #include <AP_Landing/AP_Landing.h>
 #include <AP_LandingGear/AP_LandingGear.h>     // Landing Gear library
 #include <AP_Follow/AP_Follow.h>
+#include <AP_MantaShark/AP_MantaShark.h>   // P8.5b.2 — control allocator skeleton
 #include <AP_ExternalControl/AP_ExternalControl_config.h>
 #if AP_EXTERNAL_CONTROL_ENABLED
 #include "AP_ExternalControl_Plane.h"
@@ -351,7 +352,10 @@ private:
 #if AP_QUICKTUNE_ENABLED
     AP_Quicktune quicktune;
 #endif
-    
+
+    // P8.5b.2: MantaShark control allocator (skeleton, log-only)
+    AP_MantaShark mantashark;
+
     // This is the state of the flight control system
     // There are multiple states defined such as MANUAL, FBW-A, AUTO
     Mode *control_mode = &mode_initializing;

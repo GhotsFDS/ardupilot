@@ -1257,4 +1257,88 @@ int lua_AP_Vehicle_set_target_velocity_NED(lua_State *L)
 }
 #endif // AP_SCRIPTING_BINDING_VEHICLE_ENABLED
 
+// P8.5b.2 — MantaShark allocator manual binding (skeleton)
+// hybrid: bindings.desc declares singleton, this function marshals state/demand → output.
+// Numeric-array marshal (G4): no string keys.
+//
+// Lua call: out = mantashark_alloc:solve(state, demand)
+//   state  = {base_k[5], tilts[5], pitch_rad}     -- 3-element array
+//   demand = {fx, fz, my, mz}                      -- 4-element array
+//   out    = {delta_k[5], residual[4], sat_lo, sat_hi, status}  -- 5-element array
+//
+// Skeleton: returns dummy zeros + STATUS_OK. P8.5b.3 will use real allocator.
+#include <AP_MantaShark/AP_MantaShark.h>
+int lua_mantashark_alloc_solve(lua_State *L) {
+    binding_argcheck(L, 2);
+    // arg 1: state table (already-checked-userdata at idx 1 is `mantashark_alloc`; state is arg 2)
+    // arg 2: demand table (arg 3)
+    luaL_checktype(L, 2, LUA_TTABLE);
+    luaL_checktype(L, 3, LUA_TTABLE);
+
+    AP_MantaShark::State s = {};
+    AP_MantaShark::Demand d = {};
+
+    // state[1] = base_k array
+    lua_rawgeti(L, 2, 1);
+    if (lua_istable(L, -1)) {
+        for (int i = 0; i < 5; ++i) {
+            lua_rawgeti(L, -1, i + 1);
+            s.base_k[i] = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f;
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+
+    // state[2] = tilts array
+    lua_rawgeti(L, 2, 2);
+    if (lua_istable(L, -1)) {
+        for (int i = 0; i < 5; ++i) {
+            lua_rawgeti(L, -1, i + 1);
+            s.tilts[i] = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f;
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+
+    // state[3] = pitch_rad
+    lua_rawgeti(L, 2, 3);
+    s.pitch_rad = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f;
+    lua_pop(L, 1);
+
+    // demand[1..4] = fx, fz, my, mz
+    lua_rawgeti(L, 3, 1); d.fx = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f; lua_pop(L, 1);
+    lua_rawgeti(L, 3, 2); d.fz = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f; lua_pop(L, 1);
+    lua_rawgeti(L, 3, 3); d.my = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f; lua_pop(L, 1);
+    lua_rawgeti(L, 3, 4); d.mz = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : 0.0f; lua_pop(L, 1);
+
+    AP_MantaShark::Output out = {};
+    AP::mantashark().solve(s, d, out);
+
+    // out = {delta_k[5], residual[4], sat_lo, sat_hi, status}
+    lua_createtable(L, 5, 0);
+
+    // [1] delta_k
+    lua_createtable(L, 5, 0);
+    for (int i = 0; i < 5; ++i) {
+        lua_pushnumber(L, out.delta_k[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_rawseti(L, -2, 1);
+
+    // [2] residual
+    lua_createtable(L, 4, 0);
+    for (int i = 0; i < 4; ++i) {
+        lua_pushnumber(L, out.residual[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    lua_rawseti(L, -2, 2);
+
+    // [3] sat_lo, [4] sat_hi, [5] status
+    lua_pushinteger(L, out.sat_lo); lua_rawseti(L, -2, 3);
+    lua_pushinteger(L, out.sat_hi); lua_rawseti(L, -2, 4);
+    lua_pushinteger(L, out.status); lua_rawseti(L, -2, 5);
+
+    return 1;
+}
+
 #endif  // AP_SCRIPTING_ENABLED
