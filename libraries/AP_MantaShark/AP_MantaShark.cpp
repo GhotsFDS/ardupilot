@@ -176,12 +176,18 @@ float AP_MantaShark::get_x(int col) const {
     }
     return 0.0f;
 }
+// Sanitized weight accessor (P8.5b.4a). Used by Tuner / debug paths.
+// solve() uses identical clamp inline (see hot path) — keep in sync.
 float AP_MantaShark::get_weight(int row) const {
+    auto sanitize = [](float v, float fallback) -> float {
+        if (!isfinite(v) || v < 0.0f || v > 100.0f) return fallback;
+        return v;
+    };
     switch (row) {
-        case ROW_FX: return _w_fx.get();
-        case ROW_FZ: return _w_fz.get();
-        case ROW_MY: return _w_my.get();
-        case ROW_MZ: return _w_mz.get();
+        case ROW_FX: return sanitize(_w_fx.get(), 1.0f);
+        case ROW_FZ: return sanitize(_w_fz.get(), 8.0f);
+        case ROW_MY: return sanitize(_w_my.get(), 12.0f);
+        case ROW_MZ: return sanitize(_w_mz.get(), 2.0f);
     }
     return 1.0f;
 }
@@ -295,16 +301,32 @@ void AP_MantaShark::solve(const State &s_in, const Demand &d, Output &out) {
     double A[N_ROWS * N_COLS];
     for (int i = 0; i < N_ROWS * N_COLS; ++i) A[i] = A_f[i];
 
-    // Weights from params (defaults match b.3: 1/8/12/2)
+    // P8.5b.4a (gpt5 cdaeaf6 review): read-time sanitize for weights/damping/max_iter.
+    // @Range metadata 只在 Tuner UI / preflight 提示, runtime param:set 可绕过.
+    // NaN/Inf/负数会让 normal equations 奇异 → STATUS_SINGULAR → 全 0 输出 (污染 MSK10).
+    // Clamp to safe ranges here; fall back to b.3-equivalent defaults if param out-of-bounds.
+    auto sanitize_w = [](float v, float fallback) -> double {
+        if (!isfinite(v) || v < 0.0f || v > 100.0f) return (double)fallback;
+        return (double)v;
+    };
     const double weights[N_ROWS] = {
-        (double)_w_fx.get(),
-        (double)_w_fz.get(),
-        (double)_w_my.get(),
-        (double)_w_mz.get(),
+        sanitize_w(_w_fx.get(), 1.0f),
+        sanitize_w(_w_fz.get(), 8.0f),
+        sanitize_w(_w_my.get(), 12.0f),
+        sanitize_w(_w_mz.get(), 2.0f),
     };
     const double demand[N_ROWS] = {d.fx, d.fz, d.my, d.mz};
-    const double damping = (double)_damping.get();
-    const int max_iter = std::max(1, (int)_max_iter.get());
+
+    float damp_raw = _damping.get();
+    double damping;
+    if (!isfinite(damp_raw) || damp_raw < 0.0f || damp_raw > 1.0f) {
+        damping = 1.0e-4;   // b.3 default fallback
+    } else {
+        damping = (double)damp_raw;
+    }
+
+    int iter_raw = (int)_max_iter.get();
+    int max_iter = (iter_raw >= 1 && iter_raw <= 32) ? iter_raw : 8;   // b.3 default 8
 
     double dk[N_AX] = {0, 0, 0, 0, 0};
     double lo[N_AX], hi[N_AX];

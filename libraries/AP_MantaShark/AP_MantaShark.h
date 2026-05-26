@@ -68,12 +68,19 @@ public:
     float get_damping() const { return _damping; }
     uint8_t get_max_iter() const { return uint8_t(_max_iter); }
     bool log_enabled() const { return _log_en != 0; }
-    uint8_t get_log_rate_hz() const { return uint8_t(_log_rate); }
+    // log_rate sanitized [1, 100] Hz — lua hot path 用 (decimation period)
+    uint8_t get_log_rate_hz() const {
+        int v = (int)_log_rate;
+        if (v < 1) v = 1;
+        else if (v > 100) v = 100;
+        return (uint8_t)v;
+    }
 
 private:
     static AP_MantaShark *_singleton;
 
-    // 16 MSAK_ params (per P8.5 design v3 §3, gpt5 a7f1f91 ACK)
+    // 17 registered MSAK_ params (indices 0..16). MSAK_CTRL_EN intentionally
+    // absent until P8.7+ (gpt5 P8.5b.4 review cdaeaf6).
     // index   name           default   role
     //   0   KS_GAIN          4.0       calibration: KS thrust gain
     //   1   LOG_EN           1         runtime: BIN log enable
