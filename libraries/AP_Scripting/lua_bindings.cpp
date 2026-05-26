@@ -1267,11 +1267,15 @@ int lua_AP_Vehicle_set_target_velocity_NED(lua_State *L)
 //   out    = {delta_k[5], residual[4], sat_lo, sat_hi, status}  -- 5-element array
 //
 // Skeleton: returns dummy zeros + STATUS_OK. P8.5b.3 will use real allocator.
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 #include <AP_MantaShark/AP_MantaShark.h>
 int lua_mantashark_alloc_solve(lua_State *L) {
-    binding_argcheck(L, 2);
-    // arg 1: state table (already-checked-userdata at idx 1 is `mantashark_alloc`; state is arg 2)
-    // arg 2: demand table (arg 3)
+    // mantashark_alloc:solve(state, demand) — lua passes self + state + demand = 3 args
+    // (gpt5 P8.5b.2 review fix: was 2, caused "too many arguments")
+    binding_argcheck(L, 3);
+    // arg 1: self (singleton) — already routed by generated bindings
+    // arg 2: state table {base_k[5], tilts[5], pitch_rad}
+    // arg 3: demand table {fx, fz, my, mz}
     luaL_checktype(L, 2, LUA_TTABLE);
     luaL_checktype(L, 3, LUA_TTABLE);
 
@@ -1340,5 +1344,6 @@ int lua_mantashark_alloc_solve(lua_State *L) {
 
     return 1;
 }
+#endif  // APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 
 #endif  // AP_SCRIPTING_ENABLED

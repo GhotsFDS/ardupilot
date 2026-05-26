@@ -824,8 +824,9 @@ singleton AP::fwversion() field fw_hash_str string read
 singleton AP::fwversion() field fw_hash_str rename hash
 
 -- P8.5b.2: MantaShark control allocator (skeleton). hybrid binding: .desc 注册 singleton,
--- solve() body 手写 (numeric-array marshal in lua_bindings.cpp).
-include AP_MantaShark/AP_MantaShark.h
+-- solve() body 手写 (numeric-array marshal in lua_bindings.cpp). Plane-only (fork-local).
+include AP_MantaShark/AP_MantaShark.h depends APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+singleton AP_MantaShark depends APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 singleton AP_MantaShark rename mantashark_alloc
 singleton AP_MantaShark manual solve lua_mantashark_alloc_solve 2 1
 
