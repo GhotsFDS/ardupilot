@@ -18,6 +18,8 @@
   for the frame layout.
  */
 
+#define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
+
 #include "AP_ExternalAHRS_config.h"
 
 #if AP_EXTERNAL_AHRS_FDILINK_ENABLED
@@ -33,11 +35,13 @@
 
 extern const AP_HAL::HAL &hal;
 
-#define FDILINK_FRAME_HEAD 0xFC
-#define FDILINK_FRAME_END  0xFD
-#define FDILINK_TYPE_IMU   0x40
-#define FDILINK_TYPE_AHRS  0x41
-#define FDILINK_HEADER_LEN 7
+#define FDILINK_FRAME_HEAD  0xFC
+#define FDILINK_FRAME_END   0xFD
+#define FDILINK_TYPE_IMU    0x40
+#define FDILINK_TYPE_AHRS   0x41
+#define FDILINK_TYPE_INSGPS 0x42
+#define FDILINK_TYPE_GEOPOS 0x5C
+#define FDILINK_HEADER_LEN  7
 
 // payload of type 0x40, little-endian
 struct PACKED FDILink_imu_payload {
@@ -63,6 +67,30 @@ struct PACKED FDILink_ahrs_payload {
     int64_t timestamp_us; // device time since power-up
 };
 static_assert(sizeof(FDILink_ahrs_payload) == 48, "FDILink AHRS payload must be 48 bytes");
+
+// payload of type 0x42 (INS mode only), little-endian.
+// note: local-NED location fields have a device-internal origin and no
+// lat/lon; global position arrives separately as type 0x5C
+struct PACKED FDILink_insgps_payload {
+    float body_vel[3];    // m/s, body frame
+    float body_accel[3];  // m/s^2, body frame
+    float location_ned[3];// m, local NED (origin device-internal, logged only)
+    float vel_ned[3];     // m/s, NED
+    float accel_ned[3];   // m/s^2, NED
+    float pressure_alt;   // m
+    int64_t timestamp_us; // device time since power-up
+};
+static_assert(sizeof(FDILink_insgps_payload) == 72, "FDILink INSGPS payload must be 72 bytes");
+
+// payload of type 0x5C (INS mode only), little-endian
+struct PACKED FDILink_geopos_payload {
+    double latitude_rad;  // rad (vendor ROS driver divides by DEG_TO_RAD)
+    double longitude_rad; // rad
+    double height_m;      // m
+    float hacc_m;         // m
+    float vacc_m;         // m
+};
+static_assert(sizeof(FDILink_geopos_payload) == 32, "FDILink GEOPOS payload must be 32 bytes");
 
 // constructor
 AP_ExternalAHRS_FDILink::AP_ExternalAHRS_FDILink(AP_ExternalAHRS *_frontend,
@@ -179,7 +207,9 @@ bool AP_ExternalAHRS_FDILink::check_uart()
         }
 
         const bool known_type = (frame_type == FDILINK_TYPE_IMU && flen == sizeof(FDILink_imu_payload)) ||
-                                (frame_type == FDILINK_TYPE_AHRS && flen == sizeof(FDILink_ahrs_payload));
+                                (frame_type == FDILINK_TYPE_AHRS && flen == sizeof(FDILink_ahrs_payload)) ||
+                                (frame_type == FDILINK_TYPE_INSGPS && flen == sizeof(FDILink_insgps_payload)) ||
+                                (frame_type == FDILINK_TYPE_GEOPOS && flen == sizeof(FDILink_geopos_payload));
 
         if (pktbuf[FDILINK_HEADER_LEN + flen] != FDILINK_FRAME_END) {
             if (known_type) {
@@ -204,10 +234,12 @@ bool AP_ExternalAHRS_FDILink::check_uart()
         }
 
         if (known_type) {
-            // IMU and AHRS frames share one serial number sequence
-            // (verified on captured DETA40 data: 0 gaps over 6200 frames).
-            // other types (e.g. the 1Hz 0xF0 ground frame) run independent
-            // counters, so they must not take part in loss tracking
+            // IMU/AHRS frames share one serial number sequence (verified on
+            // captured DETA40 data: 0 gaps over 6200 frames); the vendor ROS
+            // driver treats 0x42/0x5C as part of the same sequence, so track
+            // them too (to be re-confirmed outdoors in INS mode). the 1Hz
+            // 0xF0 ground frame runs an independent counter (verified) and
+            // must not take part in loss tracking
             const uint8_t sn = pktbuf[3];
             if (sn_valid) {
                 const uint8_t delta = uint8_t(sn - last_sn);
@@ -219,10 +251,19 @@ bool AP_ExternalAHRS_FDILink::check_uart()
             last_sn = sn;
             sn_valid = true;
 
-            if (frame_type == FDILINK_TYPE_IMU) {
+            switch (frame_type) {
+            case FDILINK_TYPE_IMU:
                 process_imu_packet(payload);
-            } else {
+                break;
+            case FDILINK_TYPE_AHRS:
                 process_ahrs_packet(payload);
+                break;
+            case FDILINK_TYPE_INSGPS:
+                process_insgps_packet(payload);
+                break;
+            case FDILINK_TYPE_GEOPOS:
+                process_geopos_packet(payload);
+                break;
             }
         } else {
             // e.g. 0xF0 ground frame at 1Hz on DETA40
@@ -234,6 +275,7 @@ bool AP_ExternalAHRS_FDILink::check_uart()
         progress = true;
     }
 
+    update_nav_timeout();
     log_status();
 
     return progress;
@@ -314,15 +356,19 @@ void AP_ExternalAHRS_FDILink::process_ahrs_packet(const uint8_t *payload)
     last_ahrs_pkt_ms = AP_HAL::millis();
     ahrs_frame_count++;
 
-    // TODO: optionally feed state.quat/have_quaternion once the DETA40
-    // attitude is evaluated as a source. the quaternion is wxyz and rotates
-    // body FRD into NED, so it would be:
-    //   state.quat = Quaternion{pkt.q[0], pkt.q[1], pkt.q[2], pkt.q[3]}
-    // for now the packet is parsed and logged only.
+    if (state_feed_enabled()) {
+        // wxyz quaternion rotating body FRD into NED (verified on captured
+        // data). only used by AP_AHRS when AHRS_EKF_TYPE=11 (EXTERNAL);
+        // with EKF3 active this is shadow state for comparison/logging.
+        // note: the device yaw is magnetic - see header comment
+        WITH_SEMAPHORE(state.sem);
+        state.quat = Quaternion{pkt.q[0], pkt.q[1], pkt.q[2], pkt.q[3]};
+        state.have_quaternion = true;
+    }
 
 #if HAL_LOGGING_ENABLED
     // @LoggerMessage: FDAT
-    // @Description: FDILink attitude data (parsed, not fused)
+    // @Description: FDILink device attitude data
     // @Field: TimeUS: Time since system startup
     // @Field: DTS: device timestamp
     // @Field: Roll: euler roll
@@ -342,6 +388,111 @@ void AP_ExternalAHRS_FDILink::process_ahrs_packet(const uint8_t *payload)
 #endif  // HAL_LOGGING_ENABLED
 }
 
+// 0x42 INSGPS (INS mode): NED velocity into state; local-NED position and
+// pressure altitude are device-internal (logged via FDNV, not used)
+void AP_ExternalAHRS_FDILink::process_insgps_packet(const uint8_t *payload)
+{
+    FDILink_insgps_payload pkt;
+    memcpy(&pkt, payload, sizeof(pkt));
+
+    last_insgps_pkt_ms = AP_HAL::millis();
+    insgps_frame_count++;
+    latest_palt_m = pkt.pressure_alt;
+    memcpy(latest_vel_ned, pkt.vel_ned, sizeof(latest_vel_ned));
+
+    if (state_feed_enabled()) {
+        WITH_SEMAPHORE(state.sem);
+        state.velocity = Vector3f{pkt.vel_ned[0], pkt.vel_ned[1], pkt.vel_ned[2]};
+        state.have_velocity = true;
+    }
+}
+
+// 0x5C GEODETIC_POS (INS mode): global position into state
+void AP_ExternalAHRS_FDILink::process_geopos_packet(const uint8_t *payload)
+{
+    FDILink_geopos_payload pkt;
+    memcpy(&pkt, payload, sizeof(pkt));
+
+    last_geopos_pkt_ms = AP_HAL::millis();
+    geopos_frame_count++;
+
+    // vendor sends lat/lon in radians (ROS driver divides by DEG_TO_RAD).
+    // keep the whole conversion in double: float would quantise at ~0.4m
+    // and destroy the RTK-level accuracy of the aided INS solution
+    const Location loc{
+        int32_t(pkt.latitude_rad * RAD_TO_DEG_DOUBLE * 1.0e7),
+        int32_t(pkt.longitude_rad * RAD_TO_DEG_DOUBLE * 1.0e7),
+        int32_t(pkt.height_m * 1.0e2),
+        Location::AltFrame::ABSOLUTE
+    };
+
+    if (state_feed_enabled()) {
+        WITH_SEMAPHORE(state.sem);
+        state.location = loc;
+        state.last_location_update_us = AP_HAL::micros();
+        state.have_location = true;
+        if (!state.have_origin) {
+            state.origin = loc;
+            state.have_origin = true;
+        }
+    }
+
+#if HAL_LOGGING_ENABLED
+    // @LoggerMessage: FDNV
+    // @Description: FDILink INS navigation data
+    // @Field: TimeUS: Time since system startup
+    // @Field: Lat: latitude
+    // @Field: Lon: longitude
+    // @Field: Hgt: height AMSL
+    // @Field: HAcc: horizontal position accuracy
+    // @Field: VAcc: vertical position accuracy
+    // @Field: VN: velocity north
+    // @Field: VE: velocity east
+    // @Field: VD: velocity down
+    // @Field: PAlt: pressure altitude
+    AP::logger().WriteStreaming("FDNV", "TimeUS,Lat,Lon,Hgt,HAcc,VAcc,VN,VE,VD,PAlt",
+                                "sDUmmmnnnm", "FGG0000000",
+                                "QLLfffffff",
+                                AP_HAL::micros64(),
+                                loc.lat, loc.lng, float(pkt.height_m),
+                                pkt.hacc_m, pkt.vacc_m,
+                                latest_vel_ned[0], latest_vel_ned[1], latest_vel_ned[2],
+                                latest_palt_m);
+#endif  // HAL_LOGGING_ENABLED
+}
+
+/*
+  layered nav feed: while 0x42+0x5C are fresh (within EAHRS_NAV_TMO) the
+  backend claims position/velocity. on timeout it withdraws those claims so
+  the vehicle falls back to attitude-only external AHRS: on ArduPlane the
+  fixed-wing fallback in AP_AHRS::_active_EKF_type() then demotes to DCM,
+  which navigates on the FC's own GPS.
+ */
+void AP_ExternalAHRS_FDILink::update_nav_timeout(void)
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    const uint32_t tmo = get_nav_timeout_ms();
+    const bool fresh = last_insgps_pkt_ms != 0 && last_geopos_pkt_ms != 0 &&
+                       now_ms - last_insgps_pkt_ms < tmo &&
+                       now_ms - last_geopos_pkt_ms < tmo;
+    if (fresh == nav_feed_active) {
+        return;
+    }
+    nav_feed_active = fresh;
+    if (fresh) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "FDILink: INS nav active");
+    } else {
+        // withdraw position/velocity claims; each new 0x42/0x5C frame
+        // re-latches them, so recovery is automatic
+        {
+            WITH_SEMAPHORE(state.sem);
+            state.have_velocity = false;
+            state.have_location = false;
+        }
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "FDILink: INS nav timeout, attitude-only");
+    }
+}
+
 // 1Hz stream health counters
 void AP_ExternalAHRS_FDILink::log_status(void)
 {
@@ -357,17 +508,22 @@ void AP_ExternalAHRS_FDILink::log_status(void)
     // @Field: TimeUS: Time since system startup
     // @Field: NI: valid IMU frames
     // @Field: NA: valid AHRS frames
+    // @Field: NG: valid INSGPS frames
+    // @Field: NP: valid geodetic position frames
     // @Field: NS: valid frames of skipped types
     // @Field: CE: known-type frames failing CRC or frame-end check
     // @Field: RS: parser resync events
     // @Field: SL: frames lost per serial-number gaps
-    AP::logger().WriteStreaming("FDIS", "TimeUS,NI,NA,NS,CE,RS,SL",
-                                "s------", "F000000",
-                                "QIIIIII",
+    // @Field: NAV: INS nav feed active
+    AP::logger().WriteStreaming("FDIS", "TimeUS,NI,NA,NG,NP,NS,CE,RS,SL,NAV",
+                                "s---------", "F000000000",
+                                "QIIIIIIIIB",
                                 AP_HAL::micros64(),
                                 imu_frame_count, ahrs_frame_count,
+                                insgps_frame_count, geopos_frame_count,
                                 skip_frame_count, crc_fail_count,
-                                resync_count, sn_lost_count);
+                                resync_count, sn_lost_count,
+                                uint8_t(nav_feed_active));
 #endif  // HAL_LOGGING_ENABLED
 }
 
@@ -383,8 +539,17 @@ int8_t AP_ExternalAHRS_FDILink::get_port(void) const
 // accessors for AP_AHRS
 bool AP_ExternalAHRS_FDILink::healthy(void) const
 {
+    const uint32_t now_ms = AP_HAL::millis();
     // 4 missed frames at the fixed 100Hz output rate
-    return AP_HAL::millis() - last_imu_pkt_ms < 40;
+    if (now_ms - last_imu_pkt_ms >= 40) {
+        return false;
+    }
+    if (state_feed_enabled() && last_ahrs_pkt_ms != 0 &&
+        now_ms - last_ahrs_pkt_ms >= 500) {
+        // attitude consumers rely on the 0x41 stream once it has been seen
+        return false;
+    }
+    return true;
 }
 
 bool AP_ExternalAHRS_FDILink::initialised(void) const
@@ -410,6 +575,10 @@ bool AP_ExternalAHRS_FDILink::pre_arm_check(char *failure_msg, uint8_t failure_m
         hal.util->snprintf(failure_msg, failure_msg_len, "FDILink CRC errors: %u", unsigned(crc_fail_count));
         return false;
     }
+    if (state_feed_enabled() && last_ahrs_pkt_ms == 0) {
+        hal.util->snprintf(failure_msg, failure_msg_len, "FDILink no attitude data");
+        return false;
+    }
     return true;
 }
 
@@ -417,8 +586,25 @@ void AP_ExternalAHRS_FDILink::get_filter_status(nav_filter_status &status) const
 {
     memset(&status, 0, sizeof(status));
     status.flags.initalized = initialised();
-    // attitude deliberately not claimed: the 0x41 packet is parsed but not
-    // fused (IMU + compass source only)
+    if (!state_feed_enabled()) {
+        // IMU + compass source only, no estimator claims
+        return;
+    }
+    // attitude available while the 0x41 stream is fresh
+    status.flags.attitude = healthy() && last_ahrs_pkt_ms != 0;
+    // position/velocity available while the 0x42/0x5C INS solution is
+    // fresh. these flags gate ArduPlane's EXTERNAL->DCM fallback, so they
+    // must reflect the real nav feed state
+    if (nav_feed_active) {
+        status.flags.horiz_vel = true;
+        status.flags.vert_vel = true;
+        status.flags.horiz_pos_abs = true;
+        status.flags.horiz_pos_rel = true;
+        status.flags.vert_pos = true;
+        status.flags.pred_horiz_pos_abs = true;
+        status.flags.pred_horiz_pos_rel = true;
+        status.flags.using_gps = true;
+    }
 }
 
 #endif  // AP_EXTERNAL_AHRS_FDILINK_ENABLED

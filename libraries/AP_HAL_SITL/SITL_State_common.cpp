@@ -247,6 +247,12 @@ SITL::SerialDevice *SITL_State_Common::create_serial_sim(const char *name, const
         }
         vectornav = NEW_NOTHROW SITL::VectorNav(SITL::VectorNav::VNModel::VN100);
         return vectornav;
+    } else if (streq(name, "fdilink")) {
+        if (fdilink != nullptr) {
+            AP_HAL::panic("Only one FDILink at a time");
+        }
+        fdilink = NEW_NOTHROW SITL::FDILink();
+        return fdilink;
     } else if (streq(name, "MicroStrain5")) {
         if (microstrain5 != nullptr) {
             AP_HAL::panic("Only one MicroStrain5 at a time");
@@ -397,6 +403,10 @@ void SITL_State_Common::sim_update(void)
 
     if (vectornav != nullptr) {
         vectornav->update();
+    }
+
+    if (fdilink != nullptr) {
+        fdilink->update();
     }
 
     if (microstrain5 != nullptr) {

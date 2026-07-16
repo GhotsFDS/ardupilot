@@ -54,6 +54,7 @@ public:
 protected:
     AP_ExternalAHRS::state_t &state;
     uint16_t get_rate(void) const;
+    uint16_t get_nav_timeout_ms(void) const;
     bool option_is_set(AP_ExternalAHRS::OPTIONS option) const;
 
     // set default of EAHRS_SENSORS

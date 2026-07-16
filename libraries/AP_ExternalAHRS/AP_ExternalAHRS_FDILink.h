@@ -23,12 +23,29 @@
   type 0x40 (len 56): IMU  - gyro rad/s, accel m/s^2, mag milliGauss,
                       imu temperature degC, pressure Pa (constant placeholder
                       101325 on DETA40 - never fed to baro), timestamp us
-  type 0x41 (len 48): AHRS - euler rad, quaternion wxyz (FRD body -> NED world)
+  type 0x41 (len 48): AHRS - euler rad, quaternion wxyz (FRD body -> NED
+                      world). in INS mode (external GNSS wired into the
+                      device) this is the GNSS-aided INS attitude
+  type 0x42 (len 72): INSGPS - body velocity, NED velocity (m/s), NED accel,
+                      local-NED position (unknown origin, logged only),
+                      pressure altitude, timestamp. no lat/lon, no attitude
+  type 0x5C (len 32): GEODETIC_POS - lat/lon (double, radians), height
+                      (double, m), hAcc/vAcc (float, m)
   other types (e.g. 0xF0 1Hz ground frame) are skipped by length.
 
   device body frame is FRD, matching ArduPilot conventions: verified against
   captured data by rotating measured accel with the device quaternion, giving
   (0, 0, -9.81) in NED. no axis remapping required.
+
+  state feed (unless EAHRS_OPTIONS bit 2 set), layered by freshness:
+  - 0x41 quaternion -> state.quat (attitude source for AHRS_EKF_TYPE=11)
+  - 0x42 NED velocity -> state.velocity and 0x5C -> state.location/origin
+    while fresh (EAHRS_NAV_TMO window). when the INS nav solution times out
+    the backend drops its position/velocity claims (attitude-only): on
+    ArduPlane the fixed-wing fallback in AP_AHRS::_active_EKF_type then
+    demotes the active estimator to DCM, which navigates on the FC's own GPS.
+  yaw quality depends on the device's aiding (magnetic when standalone,
+  GNSS-aided in INS mode) - evaluate before use as the primary source.
  */
 
 #pragma once
@@ -78,6 +95,17 @@ private:
 
     void process_imu_packet(const uint8_t *payload);
     void process_ahrs_packet(const uint8_t *payload);
+    void process_insgps_packet(const uint8_t *payload);
+    void process_geopos_packet(const uint8_t *payload);
+
+    // drop stale position/velocity claims (fall back to attitude-only)
+    // when the 0x42/0x5C INS solution exceeds the EAHRS_NAV_TMO window
+    void update_nav_timeout(void);
+
+    // attitude + nav feed gate (EAHRS_OPTIONS bit 2 clear = enabled)
+    bool state_feed_enabled(void) const {
+        return !option_is_set(AP_ExternalAHRS::OPTIONS::FDILINK_FEED_DISABLE);
+    }
 
     void log_status(void);
 
@@ -93,12 +121,21 @@ private:
 
     uint32_t last_imu_pkt_ms;
     uint32_t last_ahrs_pkt_ms;
+    uint32_t last_insgps_pkt_ms;  // 0x42 freshness (velocity feed)
+    uint32_t last_geopos_pkt_ms;  // 0x5C freshness (position feed)
     uint32_t last_crc_error_ms;
     uint32_t last_status_log_ms;
+    bool nav_feed_active;         // pos/vel currently claimed in state
+
+    // latest 0x42 extras for FDNV logging
+    float latest_palt_m;
+    float latest_vel_ned[3];
 
     // stream statistics, logged at 1Hz in FDIS
     uint32_t imu_frame_count;
     uint32_t ahrs_frame_count;
+    uint32_t insgps_frame_count;
+    uint32_t geopos_frame_count;
     uint32_t skip_frame_count;   // valid frames of types we don't consume
     uint32_t crc_fail_count;     // known-type frames failing crc16/frame-end
     uint32_t resync_count;       // resync events (garbage / header crc8 fail)

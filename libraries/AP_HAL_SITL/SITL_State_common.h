@@ -15,6 +15,7 @@
 #include <SITL/SIM_EFI_Hirth.h>
 #include <SITL/SIM_Vicon.h>
 #include <SITL/SIM_VectorNav.h>
+#include <SITL/SIM_FDILink.h>
 #include <SITL/SIM_MicroStrain.h>
 #include <SITL/SIM_InertialLabs.h>
 #include <SITL/SIM_AIS.h>
@@ -156,6 +157,9 @@ public:
 
     // simulated VectorNav system:
     SITL::VectorNav *vectornav;
+
+    // simulated FDILink (DETA40) system:
+    SITL::FDILink *fdilink;
 
     // simulated MicroStrain system
     SITL::MicroStrain5 *microstrain5;

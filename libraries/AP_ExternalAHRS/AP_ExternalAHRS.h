@@ -36,6 +36,7 @@ public:
     friend class AP_ExternalAHRS_backend;
     friend class AP_ExternalAHRS_SBG;
     friend class AP_ExternalAHRS_VectorNav;
+    friend class AP_ExternalAHRS_FDILink;
 
     AP_ExternalAHRS();
 
@@ -191,6 +192,7 @@ protected:
     enum class OPTIONS {
         VN_UNCOMP_IMU = 1U << 0,
         SBG_EKF_AS_GNSS = 1U << 1,
+        FDILINK_FEED_DISABLE = 1U << 2,
     };
     bool option_is_set(OPTIONS option) const { return (options.get() & int32_t(option)) != 0; }
 
@@ -202,6 +204,7 @@ private:
     AP_Int16         log_rate;
     AP_Int16         options;
     AP_Int16         sensors;
+    AP_Int16         nav_timeout_ms;
 
     static AP_ExternalAHRS *_singleton;
 

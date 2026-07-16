@@ -77,6 +77,7 @@ const AP_Param::GroupInfo AP_ExternalAHRS::var_info[] = {
     // @Description: External AHRS options bitmask
     // @Bitmask: 0:Vector Nav use uncompensated values for accel gyro and mag.
     // @Bitmask: 1:SBG uses EKF as GNSS.
+    // @Bitmask: 2:FDILink disable attitude/nav state feed (IMU+compass source only).
     // @User: Standard
     AP_GROUPINFO("_OPTIONS", 3, AP_ExternalAHRS, options, 0),
 
@@ -93,7 +94,15 @@ const AP_Param::GroupInfo AP_ExternalAHRS::var_info[] = {
     // @Units: Hz
     // @User: Standard
     AP_GROUPINFO("_LOG_RATE", 5, AP_ExternalAHRS, log_rate, 10),
-    
+
+    // @Param: _NAV_TMO
+    // @DisplayName: AHRS navigation data timeout
+    // @Description: Freshness window for the external navigation solution. FDILink: if no valid 0x42/0x5C INS data arrives within this window the backend stops claiming position/velocity and falls back to attitude-only.
+    // @Units: ms
+    // @Range: 100 5000
+    // @User: Advanced
+    AP_GROUPINFO("_NAV_TMO", 6, AP_ExternalAHRS, nav_timeout_ms, 500),
+
     AP_GROUPEND
 };
 
