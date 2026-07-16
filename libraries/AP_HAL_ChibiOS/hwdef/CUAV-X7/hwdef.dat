@@ -308,3 +308,13 @@ define HAL_IMU_TEMP_DEFAULT 45
 # Enable Sagetech MXS ADSB transponder
 define HAL_ADSB_SAGETECH_MXS_ENABLED HAL_ADSB_ENABLED
 
+
+# FDILink external IMU+compass (FDISystems DETA40 on SERIALn_PROTOCOL=36).
+# ExternalAHRS is off by default on 2MB boards (HAL_PROGRAM_SIZE_LIMIT_KB
+# gate is "> 2048"), so enable it here with only the FDILink backend to
+# keep the flash cost minimal. External baro is compiled out: the DETA40
+# pressure field is a constant placeholder and must never reach AP_Baro.
+define AP_EXTERNAL_AHRS_ENABLED 1
+define AP_EXTERNAL_AHRS_BACKEND_DEFAULT_ENABLED 0
+define AP_EXTERNAL_AHRS_FDILINK_ENABLED 1
+define AP_BARO_EXTERNALAHRS_ENABLED 0
