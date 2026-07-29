@@ -15,6 +15,8 @@
 #pragma once
 
 #include <AP_Param/AP_Param.h>
+#include <AC_PID/AC_PID.h>
+#include <Filter/LowPassFilter.h>
 
 class AP_MantaShark {
 public:
@@ -76,6 +78,16 @@ public:
         return (uint8_t)v;
     }
 
+    // ───── P8.x 水翼定高控制器 (shadow: 算+log, 不接舵机) ─────
+    // 复用 AC_PID 库类, 自喂滤波后的下视测距 (不喂 EKF, 避开浪耦合).
+    // 调用方按固定 dt tick (lua 绑定 mantashark_foil:update(dt) 或 Plane 调度).
+    // 输出 get_foil_collective() ∈ [-1,1] = 四角 collective 升力需求; 由调用方混进襟翼.
+    void  update_foil_height(float dt);
+    float get_foil_collective() const { return _foil_coll; }
+    bool  foil_height_valid()  const { return _foil_valid; }
+    float get_foil_height_filt() const { return _ht_filt; }
+    bool  foil_enabled() const { return _foil_en != 0; }
+
 private:
     static AP_MantaShark *_singleton;
 
@@ -107,6 +119,26 @@ private:
     AP_Float _damping;
     AP_Int8  _max_iter;
     AP_Int8  _log_rate;
+
+    // ───── 水翼定高控制器 (idx 17 子组 + 18..20) ─────
+    AC_PID             _foil_ht_pid;   // MSAK_FH_*  (P/I/D/FF/IMAX/FLTT/FLTE/FLTD/SMAX...)
+    LowPassFilterFloat _ht_lpf;        // 下视测距低通 (避浪耦合)
+    AP_Int8  _foil_en;                 // MSAK_FOIL_EN  默认 0 (shadow off)
+    AP_Float _foil_tgt;                // MSAK_FOIL_TGT 目标离水高度 m
+    AP_Float _foil_lpf;                // MSAK_FOIL_FLT 测距低通截止 Hz (兜底, 互补滤波后弃用)
+    AP_Float _foil_tilt;               // MSAK_FOIL_TLT 安装基准俯仰角 deg (cos 姿态补偿)
+    AP_Float _foil_tau;                // MSAK_FOIL_TAU 互补滤波时间常数 s (超声↔IMU 交叉)
+    AP_Float _foil_gate;               // MSAK_FOIL_GATE innovation 门限 m (跳变/混叠样本剔除, 0=关)
+    AP_Float _foil_trim;               // MSAK_FOIL_TRM collective 正 trim (托重基准, PID 在其上调制)
+    AP_Float _foil_neg;                // MSAK_FOIL_NEG collective 负下限 (默认0 不主动下压, 下沉靠重力)
+    float    _foil_coll  = 0.0f;       // collective 输出 [-1,1]
+    bool     _foil_valid = false;      // 有效测距 + 在跑
+    float    _ht_filt    = 0.0f;       // 融合后真实垂直高度 m (= _ht_fused)
+    float    _ht_fused   = 0.0f;       // 互补滤波状态 (超声 LF + IMU 垂速 HF)
+    bool     _ht_init    = false;      // 互补滤波是否已初始化 (首个有效样本播种)
+    uint16_t _gate_rej   = 0;          // innovation gate 连续拒收计数 (IMU 滑行中)
+    float    _ht_rest    = 0.0f;       // 安装0位: disarmed 静置雷达离水距离 (解锁冻结为基准)
+    bool     _rest_valid = false;      // 已捕获过有效0位
 };
 
 namespace AP {

@@ -970,7 +970,17 @@ void AP_DroneCAN::SRV_push_servos()
     }
 
     uint32_t servo_armed_mask = _servo_bm & non_zero_channels;
-    uint32_t esc_armed_mask = _esc_bm & non_zero_channels;
+
+    // MantaShark: ESC_NA is used for ground BDShot telemetry checks. Motor
+    // functions normally have a zero SRV output while disarmed, so filtering
+    // only through non_zero_channels prevents RawCommand from being generated
+    // before the later ESC_NA arm-gate bypass can take effect. Keep configured
+    // ESC channels active in bypass mode; scale_esc_output() maps the zero
+    // pulse to a zero-throttle command, and BRD_SAFETY_MASK is still applied
+    // below.
+    const uint32_t esc_output_channels =
+        non_zero_channels | ((_esc_unarmed.get() != 0) ? uint32_t(_esc_bm.get()) : 0U);
+    uint32_t esc_armed_mask = _esc_bm & esc_output_channels;
     const bool safety_off = hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED;
     if (!safety_off) {
         AP_BoardConfig *boardconfig = AP_BoardConfig::get_singleton();

@@ -121,7 +121,7 @@ public:
     }
 
     // return the value of BRD_SAFETY_MASK
-    uint16_t get_safety_mask(void) const {
+    uint32_t get_safety_mask(void) const {
         return uint32_t(state.ignore_safety_channels.get());
     }
 

@@ -829,6 +829,12 @@ include AP_MantaShark/AP_MantaShark.h depends APM_BUILD_TYPE(APM_BUILD_ArduPlane
 singleton AP_MantaShark depends APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 singleton AP_MantaShark rename mantashark_alloc
 singleton AP_MantaShark manual solve lua_mantashark_alloc_solve 2 1
+-- P8.x 水翼定高 shadow 控制器 (lua tick + 读 collective)
+singleton AP_MantaShark method update_foil_height void float 0 1
+singleton AP_MantaShark method get_foil_collective float
+singleton AP_MantaShark method foil_height_valid boolean
+singleton AP_MantaShark method get_foil_height_filt float
+singleton AP_MantaShark method foil_enabled boolean
 
 include AP_Follow/AP_Follow.h
 singleton AP_Follow depends AP_FOLLOW_ENABLED && (APM_BUILD_TYPE(APM_BUILD_ArduPlane)||APM_BUILD_COPTER_OR_HELI||APM_BUILD_TYPE(APM_BUILD_Rover))

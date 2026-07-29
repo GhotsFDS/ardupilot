@@ -10,6 +10,11 @@
 #include "AP_MantaShark.h"
 
 #include <AP_Math/AP_Math.h>
+#include <AP_RangeFinder/AP_RangeFinder.h>
+#include <AP_Logger/AP_Logger.h>
+#include <AP_HAL/AP_HAL.h>
+#include <AP_AHRS/AP_AHRS.h>
+#include <AP_Arming/AP_Arming.h>
 #include <algorithm>
 #include <cmath>
 
@@ -144,15 +149,177 @@ const AP_Param::GroupInfo AP_MantaShark::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("LOG_RATE", 16, AP_MantaShark, _log_rate, 50),
 
+    // ───── P8.x 水翼定高控制器 ─────
+    // @Group: FH_
+    // @Path: ../AC_PID/AC_PID.cpp
+    AP_SUBGROUPINFO(_foil_ht_pid, "FH_", 17, AP_MantaShark, AC_PID),
+
+    // @Param: FOIL_EN
+    // @DisplayName: Foil height controller enable
+    // @Description: 0=shadow off, 1=run height PID (still log-only until apply wired)
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("FOIL_EN", 18, AP_MantaShark, _foil_en, 0),
+
+    // @Param: FOIL_TGT
+    // @DisplayName: Foil target ride height
+    // @Description: Target height above water surface (downward rangefinder), meters.
+    // @Range: 0 1
+    // @Units: m
+    // @User: Standard
+    AP_GROUPINFO("FOIL_TGT", 19, AP_MantaShark, _foil_tgt, 0.15f),
+
+    // @Param: FOIL_FLT
+    // @DisplayName: Foil rangefinder low-pass cutoff
+    // @Description: LPF cutoff on downward rangefinder (wave rejection). Hz.
+    // @Range: 0.2 10
+    // @Units: Hz
+    // @User: Standard
+    AP_GROUPINFO("FOIL_FLT", 20, AP_MantaShark, _foil_lpf, 2.0f),
+
+    // @Param: FOIL_TLT
+    // @DisplayName: Foil sensor mount pitch reference
+    // @Description: Body pitch (deg) at which the downward beam is vertical. cos-comp uses cos(pitch-TLT)*cos(roll) to recover true vertical height. Set to cruise/foilborne base pitch.
+    // @Range: -20 20
+    // @Units: deg
+    // @User: Standard
+    AP_GROUPINFO("FOIL_TLT", 21, AP_MantaShark, _foil_tilt, 8.0f),
+
+    // @Param: FOIL_TAU
+    // @DisplayName: Foil height complementary filter tau
+    // @Description: Time constant (s) blending slow sonar (absolute) with fast IMU vertical velocity. Smaller=trust sonar more, larger=trust IMU more. Crossover ~1/(2*pi*tau) Hz.
+    // @Range: 0.1 3
+    // @Units: s
+    // @User: Standard
+    AP_GROUPINFO("FOIL_TAU", 22, AP_MantaShark, _foil_tau, 0.5f),
+
+    // @Param: FOIL_GATE
+    // @DisplayName: Foil sonar innovation gate
+    // @Description: Reject sonar sample if it deviates from IMU-predicted height by more than this (m). Coast on IMU up to 1s, then invalidate. Catches saturation jumps (lost echo ~19.9mA), near-field aliasing, spray. 0=disable.
+    // @Range: 0 1
+    // @Units: m
+    // @User: Standard
+    AP_GROUPINFO("FOIL_GATE", 23, AP_MantaShark, _foil_gate, 0.15f),
+
+    // @Param: FOIL_TRM
+    // @DisplayName: Foil collective trim (weight-hold bias)
+    // @Description: Steady positive collective holding craft weight at target height. PID rides on top. Foiling control = modulate lift around this trim; tune on water so I-term stays near 0 at steady ride height.
+    // @Range: 0 1
+    // @User: Standard
+    AP_GROUPINFO("FOIL_TRM", 24, AP_MantaShark, _foil_trim, 0.30f),
+
+    // @Param: FOIL_NEG
+    // @DisplayName: Foil collective lower bound
+    // @Description: Most-negative collective allowed. 0=pure lift modulation (descent via gravity reducing lift, no active downforce; avoids submerged-foil ventilation). Slightly negative permits gust down-force.
+    // @Range: -0.5 0
+    // @User: Standard
+    AP_GROUPINFO("FOIL_NEG", 25, AP_MantaShark, _foil_neg, 0.0f),
+
     AP_GROUPEND
 };
 
-AP_MantaShark::AP_MantaShark() {
+AP_MantaShark::AP_MantaShark() :
+    // foil 定高 PID 默认 (params 可覆盖): P I D FF IMAX FLTT FLTE FLTD
+    _foil_ht_pid(0.5f, 0.1f, 0.0f, 0.0f, 0.5f, 2.0f, 2.0f, 0.0f)
+{
     if (_singleton != nullptr) {
         return;
     }
     _singleton = this;
     AP_Param::setup_object_defaults(this, var_info);
+}
+
+// ───── P8.x 水翼定高控制器 (shadow: 算+log, 不接舵机) ─────
+// 复用 AC_PID 库类 (FLTT/FLTE/FLTD/IMAX/SMAX/notch 全有), 自喂滤波后的下视测距.
+// 关键: 不喂 EKF — 水面是动的(浪), EKF 把浪当地形会发散 (社区血泪).
+// 调用方须按固定 dt tick (lua 绑定 或 Plane 调度), dt 单位秒.
+void AP_MantaShark::update_foil_height(float dt)
+{
+    // 关闭 / dt 异常 → 复位防 windup, 不输出
+    if (_foil_en == 0 || dt <= 0.0f || dt > 0.2f) {
+        _foil_ht_pid.reset_I();
+        _foil_ht_pid.reset_filter();
+        _foil_coll = 0.0f;
+        _foil_valid = false;
+        _ht_init = false;            // 互补滤波下次有效样本重新播种
+        return;
+    }
+
+    // 下视测距有效性 (出水 / 丢失 / 超量程 → 冻结, 清积分)
+    RangeFinder *rf = AP::rangefinder();
+    if (rf == nullptr ||
+        rf->status_orient(ROTATION_PITCH_270) != RangeFinder::Status::Good) {
+        _foil_ht_pid.reset_I();
+        _foil_coll = 0.0f;
+        _foil_valid = false;
+        _ht_init = false;            // 丢读 → 下次有效样本重新播种 (不积分漂移)
+        return;
+    }
+
+    // ① 原始斜距 → cos 姿态补偿: 还原真实垂直高度 (波束在 base pitch 时垂直)
+    //    斜距 = 真垂直 / [cos(pitch−tilt)·cos(roll)] → 真垂直 = 斜距 × cos(...)·cos(...)
+    const float raw = rf->distance_orient(ROTATION_PITCH_270);
+    AP_AHRS &ahrs = AP::ahrs();
+    const float tilt_rad = radians(float(_foil_tilt));
+    float cos_fac = cosf(ahrs.get_pitch_rad() - tilt_rad) * cosf(ahrs.get_roll_rad());
+    cos_fac = constrain_float(cos_fac, 0.5f, 1.0f);     // 防大姿态病态
+    const float raw_vert = raw * cos_fac;
+
+    // ② 互补滤波: 超声(LF 绝对, 防漂) + IMU 垂直速度(HF 干净 400Hz, 给带宽)
+    //    gap 随上升增大; NED z 向下为正 → 上升速度 = −vel.z → gap_rate = −vel.z
+    float vz_up = 0.0f;
+    Vector3f vel_ned;
+    if (ahrs.get_velocity_NED(vel_ned)) {
+        vz_up = -vel_ned.z;
+    }
+    if (!_ht_init) {
+        _ht_fused = raw_vert;            // 首个有效样本播种, 避免起跳
+        _ht_init = true;
+        _gate_rej = 0;
+    } else {
+        _ht_fused += vz_up * dt;         // IMU 高频预测 (积分垂速)
+        // innovation gate: 样本偏离 IMU 预测超门限 = 物理不可能跳变
+        // (丢回波饱和 ~19.9mA / 盲区二次反弹混叠 / 水花假回波) → 拒收, IMU 滑行
+        const float gate = float(_foil_gate);
+        if (gate > 0.0f && fabsf(raw_vert - _ht_fused) > gate) {
+            if (++_gate_rej > 50) {      // 持续 >~1s (50 tick) → 不是瞬态, 降级 invalid
+                _foil_ht_pid.reset_I();
+                _foil_coll = 0.0f;
+                _foil_valid = false;
+                _ht_init = false;        // 下个被接受的样本重新播种
+                return;
+            }
+            // 滑行中: 跳过超声校正, PID 继续用 IMU 推算高度 (短时桥接)
+        } else {
+            _gate_rej = 0;
+            const float tau = MAX(float(_foil_tau), 0.05f);
+            const float kc  = constrain_float(dt / tau, 0.0f, 1.0f);
+            _ht_fused += (raw_vert - _ht_fused) * kc;   // 超声低频校正 (拉回绝对)
+        }
+    }
+    _ht_filt = _ht_fused;
+
+    // 安装0位: disarmed 静置时持续跟踪雷达离水距离, 解锁瞬间即冻结为基准。
+    // 目标 = 0位 + FOIL_TGT(在基准之上飞多高) → OFFSET 电气零点自动抵消, 不用标。
+    const bool armed = AP::arming().is_armed();
+    if (!armed) { _ht_rest = _ht_filt; _rest_valid = true; }
+    const float tgt_abs = (_rest_valid ? _ht_rest : 0.0f) + float(_foil_tgt);
+
+    // ③ 水翼定高控制逻辑: collective = TRIM(正, 托重基准) + PID 修正
+    //    稳态翼面停在正 trim 托重, PID 只在其上下调制升力 (err>0 太低→加升力)。
+    //    下沉靠"减升力 + 重力"非主动负角 → 负方向限到 FOIL_NEG (默认0), 全浸式防通气。
+    const float pid = _foil_ht_pid.update_all(tgt_abs, _ht_filt, dt);
+    _foil_coll = float(_foil_trim) + pid;
+    _foil_coll = constrain_float(_foil_coll, float(_foil_neg), 1.0f);
+    _foil_valid = true;
+
+    // MSKF log (调参用): 目标(绝对)/0位/斜距/cos/融合/输出 + PID 分项 + 垂速 + gate
+    AP::logger().WriteStreaming(
+        "MSKF", "TimeUS,Tgt,Rest,Raw,Vert,Fus,Out,P,I,D,Vz,GR", "Qfffffffffff",
+        AP_HAL::micros64(),
+        tgt_abs, _ht_rest, raw, raw_vert, _ht_filt, _foil_coll,
+        _foil_ht_pid.get_p(), _foil_ht_pid.get_i(), _foil_ht_pid.get_d(), vz_up,
+        (float)_gate_rej);
 }
 
 // ───── calibration accessors ─────
